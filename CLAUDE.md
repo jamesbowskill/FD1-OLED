@@ -114,13 +114,26 @@ limit: a text-sized region redraws in about 5–6 ms.
 - luma maps an RGB grey value `v` to panel level `floor(v / 16)`
   (`greyscale_device._render_greyscale`), so level 3 is 48–63 and level 2
   is 32–47; e.g. (51,51,51) is level 3 and (34,34,34) is level 2.
-- A fullscreen effect that changes every row every tick defeats luma's
-  diffing. `experiments/scramble_bg_test.py` (5 rows of Spleen 6x12 noise)
-  holds 25 fps at a 0.04 s tick, but only just: render + push averages
-  about 39.7 ms of the 40 ms budget, with spikes to about 61 ms, and uses
-  about 81% of one Pi 3B+ core. On FD1 it would share that CPU with mpv
-  and the other services, so expect dropped frames there unless the
-  packing gets faster or the background updates less often.
+- **Busy-state background (`experiments/scramble_bg_test.py`):** when all
+  210 noise cells changed every 0.04 s tick, it looked too busy on the
+  panel ("panic-inducing"). It also only just held 25 fps (39.7 ms of the
+  40 ms budget, about 81% of one Pi 3B+ core). The background now updates
+  more slowly than the frame rate: `--bg-interval` (default 4 ticks) and
+  `--bg-fraction` (default 0.15 of cells per refresh). The foreground
+  status reveal still runs every tick at 0.04 s, which looks right.
+- **What that costs on a Pi 3B+, all at 25 fps:**
+
+  | Background | Mean per frame | CPU |
+  |---|---|---|
+  | All cells every tick | 39.7 ms | about 81% |
+  | Defaults (32 cells every 4 ticks) | 12 ms | about 25% |
+  | 17 cells every 8 ticks | 8 ms | about 16% |
+- **Scattered changes cost close to a full frame whatever the fraction.**
+  luma's diffing sends one bounding box per 128x32 quarter of the screen,
+  so a refresh tick with only 15% of cells changing still costs about
+  28–34 ms (versus about 40 ms for all cells). Ticks with no background
+  change cost about 4.5 ms. `--bg-interval` is the main CPU lever;
+  `--bg-fraction` mostly controls how busy it looks.
 
 ## luma.core blanks the display on process exit unless `persist=True`
 

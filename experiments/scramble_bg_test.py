@@ -2,8 +2,10 @@
 """Fullscreen "busy state" prototype: scrambling noise background with a
 status message overlaid on the centre row.
 
-5 rows of Spleen 6x12 noise re-randomise every tick for as long as the script
-runs. The centre row's status message reveals via scramble_test.py's
+5 rows of Spleen 6x12 noise run for as long as the script does, updating more
+slowly than the frame rate: every --bg-interval ticks, a random
+--bg-fraction of the cells take a new noise character and the rest hold.
+The centre row's status message reveals via scramble_test.py's
 scramble primitive only when its text actually changes; the background never
 restarts. Per frame, in order: noise rows (dim grey), a black mask over the
 message's box, then the message in white.
@@ -57,11 +59,19 @@ def main():
     parser.add_argument("--tick", type=float, default=SCRAMBLE_TICK, help="seconds per frame")
     parser.add_argument("--bg-grey", type=int, default=51,
                         help="noise grey 0-255 (51 = panel level 3, 34 = level 2)")
+    parser.add_argument("--bg-interval", type=int, default=4,
+                        help="background may refresh only every N ticks")
+    parser.add_argument("--bg-fraction", type=float, default=0.15,
+                        help="fraction of background cells that change per refresh (0-1)")
     parser.add_argument("--dwell", type=float, default=4.0, help="seconds per status message")
     parser.add_argument("--reveal", type=float, default=1.6, help="seconds for a message reveal")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
     args = parser.parse_args()
+    if args.bg_interval < 1:
+        parser.error("--bg-interval must be at least 1")
+    if not 0.0 <= args.bg_fraction <= 1.0:
+        parser.error("--bg-fraction must be between 0 and 1")
 
     rng = random.Random(args.seed)
     font = load_font(FONT_PX)
@@ -73,6 +83,9 @@ def main():
     y0 = (device.height - ROWS * FONT_PX) // 2
     status_y = y0 + STATUS_ROW * FONT_PX
     bg = (args.bg_grey,) * 3
+    grid = [[rng.choice(NOISE) for _ in range(cols)] for _ in range(ROWS)]
+    cells = [(r, c) for r in range(ROWS) for c in range(cols)]
+    bg_changes = round(args.bg_fraction * len(cells))
 
     canvas = Image.new(device.mode, device.size, "black")
     draw = ImageDraw.Draw(canvas)
@@ -81,10 +94,11 @@ def main():
         args.save_frames.mkdir(parents=True, exist_ok=True)
 
     print(f"{cols}x{ROWS} noise grid at ({x0},{y0}), bg grey {args.bg_grey}, "
-          f"tick {args.tick * 1000:.0f} ms. Stop with ./rig stop.")
+          f"tick {args.tick * 1000:.0f} ms, bg: {bg_changes}/{len(cells)} cells "
+          f"every {args.bg_interval} ticks. Stop with ./rig stop.")
 
     frame = 0
-    render_ms = []
+    refresh_ms, other_ms = [], []
     start_t = stats_t = time.perf_counter()
     while True:
         t0 = time.perf_counter()
@@ -92,10 +106,14 @@ def main():
         if status.set_text(message):
             print(f"status -> {message}")
 
+        bg_refresh = frame % args.bg_interval == 0
+        if bg_refresh:
+            for r, c in rng.sample(cells, bg_changes):
+                grid[r][c] = rng.choice(NOISE)
+
         draw.rectangle((0, 0, device.width - 1, device.height - 1), fill="black")
         for row in range(ROWS):
-            noise = "".join(rng.choice(NOISE) for _ in range(cols))
-            draw.text((x0, y0 + row * FONT_PX), noise, font=font, fill=bg)
+            draw.text((x0, y0 + row * FONT_PX), "".join(grid[row]), font=font, fill=bg)
 
         status_x = x0 + (cols - len(message)) // 2 * advance
         draw.rectangle((status_x, status_y, status_x + len(message) * advance - 1,
@@ -103,16 +121,22 @@ def main():
         draw.text((status_x, status_y), status.next_chars(), font=font, fill="white")
 
         device.display(canvas)
-        render_ms.append((time.perf_counter() - t0) * 1000)
+        (refresh_ms if bg_refresh else other_ms).append((time.perf_counter() - t0) * 1000)
         if args.save_frames:
             canvas.save(args.save_frames / f"frame_{frame:04d}.png")
 
         frame += 1
         now = time.perf_counter()
         if now - stats_t >= STATS_EVERY_S:
-            print(f"{len(render_ms) / (now - stats_t):.1f} fps; render+push mean "
-                  f"{sum(render_ms) / len(render_ms):.1f} ms, max {max(render_ms):.1f} ms")
-            render_ms.clear()
+            all_ms = refresh_ms + other_ms
+            line = (f"{len(all_ms) / (now - stats_t):.1f} fps; render+push mean "
+                    f"{sum(all_ms) / len(all_ms):.1f} ms, max {max(all_ms):.1f} ms")
+            for label, ms in (("bg-refresh", refresh_ms), ("other", other_ms)):
+                if ms:
+                    line += f" | {label} ticks mean {sum(ms) / len(ms):.1f} ms"
+            print(line)
+            refresh_ms.clear()
+            other_ms.clear()
             stats_t = now
         time.sleep(max(0.0, start_t + frame * args.tick - time.perf_counter()))
 
