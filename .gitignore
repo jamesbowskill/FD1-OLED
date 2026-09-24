@@ -2,3 +2,5 @@ venv/
 incoming/
 __pycache__/
 *.pyc
+run/
+logs/

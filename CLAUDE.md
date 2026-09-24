@@ -24,17 +24,29 @@ rig's wiring, which has also been physically verified).
   `oled_common`.
 - `venv/` — Python venv with `luma.core`, `luma.oled`, `Pillow`, `watchdog`,
   etc. Always run scripts with `venv/bin/python3`, not system Python.
-- `oled-watcher.service` (`/etc/systemd/system/oled-watcher.service`) — runs
-  `watcher.py` on boot, as user `jbtokyo` (not root — this rig deliberately
-  doesn't run as root, unlike FD1's four services; `jbtokyo`'s `spi`/`gpio`/
-  `i2c` group membership covers SPI/GPIO access instead). Enabled via
-  `systemctl enable`. Sets `PYTHONUNBUFFERED=1` so `journalctl -u
-  oled-watcher.service -f` shows output live instead of buffered.
+- `rig` — picks which utility owns the OLED, one at a time. Nothing starts
+  on boot; run what you need explicitly:
+  - `./rig run <script> [args]` — stops whatever currently holds the OLED,
+    then starts `<script>` detached (`setsid nohup`, survives SSH
+    disconnects), logging to `logs/<name>.log`. Looks for `<script>` in the
+    repo root, then `experiments/`, so `./rig run watcher.py` and
+    `./rig run fps_benchmark.py` both work.
+  - `./rig stop` — stops the rig-managed script, plus any other process
+    still holding `/dev/gpiochip0` (e.g. a script started by hand).
+  - `./rig status` — what's running (or last ran), its log, and whether the
+    GPIO chip is free.
+  State lives in `run/current`; `run/` and `logs/` are gitignored.
+- `oled-watcher.service` (`/etc/systemd/system/oled-watcher.service`) — the
+  old always-on way of running `watcher.py`. Now **disabled and stopped**
+  in favour of `rig`; the unit file is kept but would compete with `rig`
+  for the GPIO chip if re-enabled. It runs as user `jbtokyo`, not root
+  (this rig deliberately doesn't run as root, unlike FD1's four services;
+  `jbtokyo`'s `spi`/`gpio`/`i2c` group membership covers access instead).
 
 
 ## Figma → OLED pipeline (Syncthing)
 
-Figma exports sync automatically from the Mac to `~/oled/incoming` on this Pi, where `watcher.py` picks them up. Round trip is ~12 seconds, Figma export to OLED.
+Figma exports sync automatically from the Mac to `~/oled/incoming` on this Pi, where `watcher.py` picks them up (only while it's running: `./rig run watcher.py`). Round trip is ~12 seconds, Figma export to OLED.
 
 - **Mac side**: Syncthing app (`syncthing-app` cask), folder `/Volumes/Neptune/FD1/design/OLED/export`, type **Send Only**.
 - **Pi side**: Syncthing installed via apt (official keyring-based repo, not the deprecated `apt-key` method), running as a `--user` systemd service under `jbtokyo` (`systemctl --user status syncthing.service`). Linger is enabled (`loginctl enable-linger jbtokyo`) so it keeps running without an active SSH session. Folder `~/oled/incoming`, type **Receive Only** — deliberately one-way, so nothing on the Pi (test files, leftovers) can sync back and pollute the Mac's export folder.
@@ -50,6 +62,28 @@ Then open `http://localhost:8385` on the Mac. (Port 8385 locally, not 8384, to a
 
 **Re-pairing from scratch** (e.g. new Mac, reinstalled Syncthing): each side needs the other's Device ID (**Actions → Show ID** in the UI) added as a remote device, and each side has to separately accept the resulting connection request — adding the ID on one side isn't enough on its own.
 
+
+## Measured SSD1322 redraw rate (`experiments/fps_benchmark.py`, 2026-09-24)
+
+On this Pi 3B+ at luma's default 8 MHz SPI clock, full-frame pushes
+(`full_frame()` framebuffer, 256x64) run at **22.6 fps, 44 ms/frame**
+(median 44.4 ms, range about 31–67 ms). This was the same across three
+separate runs.
+
+- **The bottleneck is Python, not SPI.** A pre-packed full-frame SPI push
+  takes about 9 ms (about 111 fps ceiling). The other about 35 ms is
+  `luma.oled`'s pure-Python per-pixel RGB→4-bit packing loop
+  (`greyscale_device._render_greyscale`), about 77% of frame time in a
+  cProfile run. Raising the SPI clock can't lift the full-frame rate
+  much; faster packing (e.g. numpy) is the bigger lever.
+- **Partial redraw is already supported by the chip and done by luma.** The
+  SSD1322 accepts writes to a column/row window, and luma's default
+  `diff_to_previous()` framebuffer only pushes changed regions (diffed on a
+  2x2 grid of 128x32 segments, then trimmed to the changed box). A 64x16
+  region toggling ran at about 250 fps (4 ms/frame) in a one-off probe.
+  An identical frame costs about 0.5 ms and sends nothing over SPI.
+- Per-frame time depends on content: black pixels skip work in the packing
+  loop, so all-black frames are faster than bright or busy ones.
 
 ## luma.core blanks the display on process exit unless `persist=True`
 
@@ -69,8 +103,8 @@ with a blocking `input("Press Enter to exit...")` — it never hit the
 anything if you either pause it before exit (e.g. `time.sleep(15)`) or run
 it in the background and check the screen while it's still alive.
 
-`watcher.py` is a long-running loop, so it wouldn't hit this in practice —
-but it sets `device.persist = True` explicitly anyway (with a comment
-pointing back here), so this can't be silently reintroduced if the script's
-structure changes later. Any new one-shot test script on this rig should do
-the same, or hold the process open before exiting.
+`oled_common.get_device()` sets `device.persist = True` (with a comment
+pointing back here), so every script that uses it is covered, including
+one-shot experiments. Don't build a device by hand with `spi()`/`ssd1322()`
+in new scripts. Use `get_device()` so the guard can't be dropped by
+accident.

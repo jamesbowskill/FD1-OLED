@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Runs one OLED utility at a time, detached from the SSH session and logged.
+#   rig run <script> [args...]   stop whatever holds the OLED, start <script>
+#   rig stop                     stop it (plus any stray GPIO holder)
+#   rig status                   what's running, and whether the GPIO chip is free
+set -uo pipefail
+
+ROOT="$(dirname "$(readlink -f "$0")")"
+PY="$ROOT/venv/bin/python3"
+STATE="$ROOT/run/current"   # "<pid> <script> <log>"
+LOG_DIR="$ROOT/logs"
+
+usage() {
+  echo "usage: rig run <script> [args...] | rig stop | rig status" >&2
+  exit 2
+}
+
+# PID of the rig-managed script, only if it's still that script (guards PID reuse).
+current_pid() {
+  [[ -f $STATE ]] || return 1
+  local pid script _log
+  read -r pid script _log < "$STATE"
+  [[ -r /proc/$pid/cmdline ]] || return 1
+  tr '\0' ' ' < "/proc/$pid/cmdline" | grep -qF "$script" || return 1
+  echo "$pid"
+}
+
+gpio_check() {
+  "$PY" - "$ROOT" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from oled_common import GpioBusyError, check_gpio_free
+try:
+    check_gpio_free()
+except GpioBusyError as e:
+    print(e)
+    sys.exit(1)
+print("GPIO chip is free (/dev/gpiochip0)")
+EOF
+}
+
+gpio_holder_pids() {
+  "$PY" - "$ROOT" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from oled_common import gpio_holders
+for pid, _ in gpio_holders():
+    print(pid)
+EOF
+}
+
+stop_pid() {
+  local pid=$1
+  kill -TERM "$pid" 2>/dev/null || return 0
+  for _ in $(seq 50); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
+resolve_script() {
+  local arg=$1
+  for candidate in "$ROOT/$arg" "$ROOT/experiments/$arg" "$arg"; do
+    if [[ -f $candidate ]]; then
+      readlink -f "$candidate"
+      return 0
+    fi
+  done
+  echo "rig: no such script: $arg" >&2
+  return 1
+}
+
+cmd_stop() {
+  local stopped=0 pid _s _l script
+  if pid=$(current_pid); then
+    read -r _s script _l < "$STATE"
+    echo "Stopping ${script#"$ROOT"/} (PID $pid)"
+    stop_pid "$pid"
+    stopped=1
+  fi
+  for pid in $(gpio_holder_pids); do
+    echo "Stopping other GPIO holder PID $pid: $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)"
+    stop_pid "$pid"
+    stopped=1
+  done
+  (( stopped )) || echo "Nothing running."
+}
+
+cmd_run() {
+  (( $# >= 1 )) || usage
+  local script rel log pid rc
+  script=$(resolve_script "$1") || exit 1
+  shift
+  rel=${script#"$ROOT"/}
+
+  cmd_stop
+  if ! gpio_check > /dev/null; then
+    gpio_check
+    exit 1
+  fi
+
+  mkdir -p "$ROOT/run" "$LOG_DIR"
+  log="$LOG_DIR/$(basename "$script" .py).log"
+  echo "=== $(date '+%F %T') rig run $rel $* ===" >> "$log"
+
+  cd "$ROOT" || exit 1
+  setsid nohup "$PY" -u "$script" "$@" >> "$log" 2>&1 < /dev/null &
+  pid=$!
+  echo "$pid $script $log" > "$STATE"
+
+  sleep 2
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "Started $rel (PID $pid)"
+    echo "Log: $log"
+  else
+    wait "$pid"
+    rc=$?
+    echo "$rel exited within 2s (status $rc). Last log lines:"
+    tail -n 20 "$log"
+    exit "$rc"
+  fi
+}
+
+cmd_status() {
+  local pid script log running=""
+  if [[ -f $STATE ]]; then
+    read -r pid script log < "$STATE"
+    if current_pid > /dev/null; then
+      running=$pid
+      echo "Running: ${script#"$ROOT"/} (PID $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))"
+    else
+      echo "Not running (last run: ${script#"$ROOT"/}, exited)"
+    fi
+    echo "Log: $log"
+  else
+    echo "Not running."
+  fi
+  if [[ -n $running && "$(gpio_holder_pids)" == "$running" ]]; then
+    echo "GPIO chip held by it (PID $running), as expected"
+  else
+    gpio_check
+  fi
+  if systemctl is-enabled --quiet oled-watcher.service 2>/dev/null \
+      || systemctl is-active --quiet oled-watcher.service 2>/dev/null; then
+    echo "Note: oled-watcher.service is enabled or active; it will compete with rig."
+  fi
+}
+
+case "${1:-}" in
+  run) shift; cmd_run "$@" ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+  *) usage ;;
+esac
