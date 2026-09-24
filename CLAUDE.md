@@ -118,18 +118,29 @@ Positions measured from James's Figma export (`incoming/OLED.png`). Rows
 prototype's rows 1–2 match the export exactly.
 
 - **Text area:** x 9–248 (240 px = 30 cols at 8 px, 40 at 6 px, 48 at 5 px).
-- **Greys:** only two, white (255) and dim (34,34,34, panel level 2).
+- **Greys, four tiers:**
+
+  | Tier | Grey | Used for |
+  |---|---|---|
+  | White | 255 | Row 1 and Row 2 text only |
+  | Mid | `--mid-grey`, default 136 (level 8) | elapsed, played bar, counter |
+  | Total | `--total-grey`, default 68 (level 4) | total duration |
+  | Dim | 34 (level 2, validated) | unplayed bar, Row 2's `\|` |
+
+  Nothing in Row 3 is white, so it doesn't compete with the title. The mid
+  and total defaults are starting points for judging on the panel. Choose
+  values by eye with the flags, then fold the chosen ones in as defaults.
 - **Row 1:** title, 8x16, cell y 10, white.
 - **Row 2:** `artist | album`, 6x12, cell y 29, white. The `|` is Spleen's
   own glyph in dim.
 - **Row 3:** 5x8, cell y 47, on a 48-column grid:
 
-  | Element | Columns | Grey |
+  | Element | Columns | Tier |
   |---|---|---|
-  | Elapsed | 0–4 | white |
-  | Progress bar | 6–31 (26 slashes) | white played, dim remaining |
-  | Total | 33–37 | dim |
-  | Counter, right-aligned in a "999/999" field | 41–47 | white |
+  | Elapsed | 0–4 | mid |
+  | Progress bar | 6–31 (26 slashes) | mid played, dim remaining |
+  | Total | 33–37 | total |
+  | Counter, right-aligned in a "999/999" field | 41–47 | mid |
 - **Scrambles:**
   - Every element scrambles in once, on the first paint.
   - After that, the title re-scrambles on every track change, and

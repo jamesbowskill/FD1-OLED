@@ -15,7 +15,9 @@ Scramble rules:
     and updates silently, including on track changes.
 Positions come from James's Figma export (incoming/OLED.png): rows 1-2
 match Spleen renders pixel for pixel; row 3 sits on the same 5px grid.
-Greys are white or the panel-validated dim level 2 (34,34,34).
+Four grey tiers: white (rows 1-2 text only); --mid-grey (elapsed, played
+bar, counter); --total-grey (total duration); and the panel-validated dim
+level 2 (34,34,34) for the unplayed bar and the | separator.
 """
 
 import argparse
@@ -148,7 +150,18 @@ def main():
     parser.add_argument("--reveal", type=float, default=1.6, help="seconds per scramble reveal")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
+    parser.add_argument("--total-grey", type=int, default=68,
+                        help="total duration grey 0-255 (68 = panel level 4)")
+    parser.add_argument("--mid-grey", type=int, default=136,
+                        help="elapsed, played bar and counter grey 0-255 (136 = level 8)")
     args = parser.parse_args()
+    for flag, value in (("--total-grey", args.total_grey), ("--mid-grey", args.mid_grey)):
+        if not 0 <= value <= 255:
+            parser.error(f"{flag} must be 0-255")
+    total_grey = (args.total_grey,) * 3
+    mid_grey = (args.mid_grey,) * 3
+    print(f"Row 3 greys: mid {args.mid_grey} (level {args.mid_grey // 16}), "
+          f"total {args.total_grey} (level {args.total_grey // 16}), dim {DIM[0]} (level {DIM[0] // 16})")
 
     rng = random.Random(args.seed)
     fonts = {px: load_font(px) for px in (16, 12, 8)}
@@ -221,13 +234,13 @@ def main():
         draw.rectangle((0, 0, device.width - 1, device.height - 1), fill="black")
         draw_scrolling(title, 16, ROW1_Y)
         draw_scrolling(artist_album, 12, ROW2_Y, pipe_grey=DIM)
-        draw_row3_text(row3["elapsed"], ELAPSED_COL, WHITE)
+        draw_row3_text(row3["elapsed"], ELAPSED_COL, mid_grey)
         bar = row3["bar"].visible_text()
         draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar, font=fonts[8], fill=DIM)
         if bar_done:
-            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=fonts[8], fill=WHITE)
-        draw_row3_text(row3["total"], TOTAL_COL, DIM)
-        draw_row3_text(row3["counter"], COUNTER_COL, WHITE)
+            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=fonts[8], fill=mid_grey)
+        draw_row3_text(row3["total"], TOTAL_COL, total_grey)
+        draw_row3_text(row3["counter"], COUNTER_COL, mid_grey)
 
         device.display(canvas)
         frame_ms.append((time.perf_counter() - t0) * 1000)
