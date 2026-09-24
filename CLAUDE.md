@@ -22,6 +22,16 @@ rig's wiring, which has also been physically verified).
   graduate to top-level scripts; things that don't can stay here or be
   deleted later. Scripts here add the repo root to `sys.path` to import
   `oled_common`.
+- `fonts/spleen/` — Spleen 6x12 and 8x16 BDF files plus their BSD-2-Clause
+  licence, from github.com/fcambus/spleen (commit 57f9219). Other sizes
+  there: 5x8, 12x24, 16x32, 32x64. Load with
+  `ImageFont.truetype("…/spleen-8x16.bdf", size=16)`: FreeType reads BDF
+  natively and rejects any size but the native one, so the font can't be
+  scaled by accident. `ImageFont.load()` on a raw `.bdf` does **not**
+  work (it wants Pillow's `.pil` format; FD1's HARDWARE.md says otherwise
+  and is wrong). Rendering is pure black/white with no anti-aliasing,
+  fixed advance (6 px / 8 px), and cells of 12 px (9 ascent + 3 descent)
+  or 16 px (12 + 4).
 - `venv/` — Python venv with `luma.core`, `luma.oled`, `Pillow`, `watchdog`,
   etc. Always run scripts with `venv/bin/python3`, not system Python.
 - `rig` — picks which utility owns the OLED, one at a time. Nothing starts
