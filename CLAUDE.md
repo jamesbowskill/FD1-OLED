@@ -132,6 +132,36 @@ Measured on the Pi 3B+:
   disc, versus 128 fps with a fixed 4.8° per frame (the per-frame step at
   25 fps).
 
+## Wireframe floppy disc (`experiments/wireframe_disc.py`)
+
+A rotating 3D wireframe built live from `assets/disc/*.svg`, a 94x98
+canvas with absolute M/L/H/V/Z paths only, read by a small hand-rolled
+parser.
+
+- **Model:**
+  - `outline.svg` at z=0 and z=`DISC_DEPTH`, joined point-to-point.
+  - `front.svg` at z=0.
+  - `media.svg` at `MEDIA_DEPTH`.
+  - `back.svg` at `DISC_DEPTH`, x mirrored (`94 - x`), because it was drawn
+    as seen with the disc flipped over. After mirroring, its shutter and
+    window land exactly on the front's.
+  - 74 points; +z points toward the viewer.
+- **Face gating:** outline and extrusion always draw. `front.svg` draws
+  while `cos(angle) > -FACE_OVERLAP`, and `media.svg` + `back.svg` while
+  `cos(angle) < FACE_OVERLAP`. Without gating, both faces' shutters and
+  the hub showed through at once and angled views were cluttered.
+  `FACE_OVERLAP` defaults to 0 (a hard swap at edge-on): in captured
+  frames, 0.1 drew both groups squashed into the edge-on sliver, making a
+  white clump.
+- **Tuning constants at the top of the file:** `DISC_DEPTH` (-10),
+  `MEDIA_DEPTH` (half of `DISC_DEPTH`), `LINE_WIDTH`, `FACE_OVERLAP`,
+  `DEG_PER_FRAME` (4.8, i.e. 120°/s at 25 fps), `DISC_HEIGHT_PX` (48),
+  `CAMERA_DISTANCE`.
+- **Performance at 25 fps on the Pi 3B+:** about 9–11 ms per frame, about
+  21–26% of one core.
+- **Checking geometry changes:** `--stills DIR` renders PNGs at 45° steps
+  without the panel.
+
 ## Animation pace: scramble-decode and scrolling need different ticks
 
 On the real panel, the scramble-decode reveal

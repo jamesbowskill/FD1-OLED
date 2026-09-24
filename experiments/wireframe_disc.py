@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Wireframe floppy disc built from the SVGs in assets/disc/.
-
-Step A (current): render still frames at several angles to PNGs for review.
-No panel access yet; the live rotation loop comes once the geometry is
-confirmed.
+"""Rotating wireframe floppy disc built from the SVGs in assets/disc/.
 
 Model (SVG units, 94x98 canvas; +z points toward the viewer):
   outline.svg  at z=0 and z=DISC_DEPTH, joined point-to-point (extrusion)
@@ -11,13 +7,26 @@ Model (SVG units, 94x98 canvas; +z points toward the viewer):
   media.svg    at z=MEDIA_DEPTH (the magnetic disk, recessed in the shell)
   back.svg     at z=DISC_DEPTH, x mirrored (x -> width - x): it was drawn
                as seen with the disc flipped over
+
+Face gating: the outline and extrusion always draw; front.svg's details
+draw only while the front faces the viewer, media.svg's and back.svg's only
+while the back does (facing = cos(angle), single-axis rotation), each with
+FACE_OVERLAP of slack around edge-on.
+
+Live mode spins at a fixed DEG_PER_FRAME on deadline ticks (not elapsed
+time, so frame cost stays honest; see CLAUDE.md). --stills DIR renders PNGs
+at 45 degree steps instead, without touching the panel.
 """
 
 import argparse
 import math
 import re
+import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PIL import Image, ImageDraw
 
@@ -27,11 +36,15 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets" / "disc"
 DISC_DEPTH = -10.0              # SVG units; exaggerated, real ratio won't read
 MEDIA_DEPTH = DISC_DEPTH / 2
 LINE_WIDTH = 1
+FACE_OVERLAP = 0.0              # facing slack at edge-on; >0 shows both groups briefly
+DEG_PER_FRAME = 4.8             # 120 deg/s at 25 fps
+TICK = 0.04                     # 25 fps
 DISC_HEIGHT_PX = 48             # on-screen height of the 98-unit disc face at 0 deg
 CAMERA_DISTANCE = 300.0         # SVG units from the disc centre; mild perspective
 
 PANEL_SIZE = (256, 64)
 STILL_ANGLES = range(0, 360, 45)
+STATS_EVERY_S = 10.0
 
 _TOKEN = re.compile(r"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 
@@ -88,31 +101,45 @@ def load_svg(name):
 
 
 def build_model():
-    """Return (points3d, edges, (cx, cy, cz)) in SVG units."""
-    pts, edges = [], []
+    """Return (points3d, edge groups, centre, face height) in SVG units.
 
-    def add(path_pts, closed, z, mirror_width=None):
+    Edge groups: "always" (outline + extrusion), "front", "back" (back
+    details and media)."""
+    pts = []
+    groups = {"always": [], "front": [], "back": []}
+
+    def add(group, path_pts, closed, z, mirror_width=None):
         start = len(pts)
         for x, y in path_pts:
             pts.append((mirror_width - x if mirror_width else x, y, z))
         n = len(path_pts)
-        edges.extend((start + k, start + k + 1) for k in range(n - 1))
+        groups[group].extend((start + k, start + k + 1) for k in range(n - 1))
         if closed and n > 2:
-            edges.append((start + n - 1, start))
+            groups[group].append((start + n - 1, start))
         return start
 
     outline, width, height = load_svg("outline.svg")
     for path_pts, closed in outline:
-        front_start = add(path_pts, closed, 0.0)
-        back_start = add(path_pts, closed, DISC_DEPTH)
-        edges.extend((front_start + k, back_start + k) for k in range(len(path_pts)))
+        front_start = add("always", path_pts, closed, 0.0)
+        back_start = add("always", path_pts, closed, DISC_DEPTH)
+        groups["always"].extend((front_start + k, back_start + k) for k in range(len(path_pts)))
     for path_pts, closed in load_svg("front.svg")[0]:
-        add(path_pts, closed, 0.0)
+        add("front", path_pts, closed, 0.0)
     for path_pts, closed in load_svg("media.svg")[0]:
-        add(path_pts, closed, MEDIA_DEPTH)
+        add("back", path_pts, closed, MEDIA_DEPTH)
     for path_pts, closed in load_svg("back.svg")[0]:
-        add(path_pts, closed, DISC_DEPTH, mirror_width=width)
-    return pts, edges, (width / 2, height / 2, DISC_DEPTH / 2), height
+        add("back", path_pts, closed, DISC_DEPTH, mirror_width=width)
+    return pts, groups, (width / 2, height / 2, DISC_DEPTH / 2), height
+
+
+def visible_edges(groups, angle):
+    facing = math.cos(angle)
+    edges = list(groups["always"])
+    if facing > -FACE_OVERLAP:
+        edges += groups["front"]
+    if facing < FACE_OVERLAP:
+        edges += groups["back"]
+    return edges
 
 
 def project(pts, centre, face_height, angle, size=PANEL_SIZE):
@@ -131,30 +158,67 @@ def project(pts, centre, face_height, angle, size=PANEL_SIZE):
     return out
 
 
-def render(draw, proj, edges, size=PANEL_SIZE):
+def render(draw, model, angle, size=PANEL_SIZE):
+    pts, groups, centre, face_height = model
+    proj = project(pts, centre, face_height, angle, size)
     draw.rectangle((0, 0, size[0] - 1, size[1] - 1), fill="black")
-    for a, b in edges:
+    for a, b in visible_edges(groups, angle):
         draw.line((proj[a], proj[b]), fill="white", width=LINE_WIDTH)
 
 
-def render_stills(out_dir):
-    pts, edges, centre, face_height = build_model()
+def render_stills(out_dir, angles=STILL_ANGLES):
+    model = build_model()
     out_dir.mkdir(parents=True, exist_ok=True)
-    frames = []
-    for deg in STILL_ANGLES:
+    for deg in angles:
         im = Image.new("RGB", PANEL_SIZE, "black")
-        render(ImageDraw.Draw(im), project(pts, centre, face_height, math.radians(deg)), edges)
-        im.save(out_dir / f"disc_{deg:03d}.png")
-        frames.append((deg, im))
-    print(f"{len(pts)} points, {len(edges)} edges; wrote {len(frames)} stills to {out_dir}")
-    return frames
+        render(ImageDraw.Draw(im), model, math.radians(deg))
+        im.save(out_dir / f"disc_{deg:05.1f}.png")
+    print(f"{len(model[0])} points; wrote {len(angles)} stills to {out_dir}")
+
+
+def run_live(deg_per_frame, tick):
+    from oled_common import get_device
+
+    model = build_model()
+    device = get_device()
+    canvas = Image.new(device.mode, device.size, "black")
+    draw = ImageDraw.Draw(canvas)
+    print(f"Spinning at {deg_per_frame} deg/frame, {1 / tick:.0f} fps "
+          f"({deg_per_frame / tick:.0f} deg/s). Stop with ./rig stop.")
+
+    frame = 0
+    frame_ms = []
+    start = stats_t = time.perf_counter()
+    cpu0 = time.process_time()
+    while True:
+        t0 = time.perf_counter()
+        render(draw, model, math.radians(frame * deg_per_frame))
+        device.display(canvas)
+        frame_ms.append((time.perf_counter() - t0) * 1000)
+        frame += 1
+
+        now = time.perf_counter()
+        if now - stats_t >= STATS_EVERY_S:
+            cpu = time.process_time()
+            print(f"{len(frame_ms) / (now - stats_t):.1f} fps; render+push mean "
+                  f"{sum(frame_ms) / len(frame_ms):.1f} ms, max {max(frame_ms):.1f} ms; "
+                  f"CPU {(cpu - cpu0) / (now - stats_t) * 100:.0f}% of one core")
+            frame_ms.clear()
+            stats_t, cpu0 = now, cpu
+        time.sleep(max(0.0, start + frame * tick - time.perf_counter()))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("out_dir", type=Path, help="directory for the still PNGs")
+    parser.add_argument("--stills", type=Path, metavar="DIR",
+                        help="render PNGs at 45 degree steps to DIR instead of spinning on the panel")
+    parser.add_argument("--deg-per-frame", type=float, default=DEG_PER_FRAME)
+    parser.add_argument("--tick", type=float, default=TICK, help="seconds per frame")
     args = parser.parse_args()
-    render_stills(args.out_dir)
+    if args.stills:
+        render_stills(args.stills)
+    else:
+        run_live(args.deg_per_frame, args.tick)
 
 
 if __name__ == "__main__":
