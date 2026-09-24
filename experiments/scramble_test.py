@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 from oled_common import get_device
 
 FONTS = {
+    8: ROOT / "fonts" / "spleen" / "spleen-5x8.bdf",
     12: ROOT / "fonts" / "spleen" / "spleen-6x12.bdf",
     16: ROOT / "fonts" / "spleen" / "spleen-8x16.bdf",
 }

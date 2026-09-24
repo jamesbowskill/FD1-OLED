@@ -22,9 +22,11 @@ rig's wiring, which has also been physically verified).
   graduate to top-level scripts; things that don't can stay here or be
   deleted later. Scripts here add the repo root to `sys.path` to import
   `oled_common`.
-- `fonts/spleen/` — Spleen 6x12 and 8x16 BDF files plus their BSD-2-Clause
-  licence, from github.com/fcambus/spleen (commit 57f9219). Other sizes
-  there: 5x8, 12x24, 16x32, 32x64. Load with
+- `fonts/spleen/` — Spleen 5x8, 6x12 and 8x16 BDF files plus their
+  BSD-2-Clause licence, from github.com/fcambus/spleen (commit 57f9219).
+  Other sizes there: 12x24, 16x32, 32x64. 5x8 has a 5 px advance and an
+  8 px cell (7 ascent + 1 descent); its `/` is a full-cell diagonal, so a
+  run of slashes forms a continuous hatch on a 5 px pitch. Load with
   `ImageFont.truetype("…/spleen-8x16.bdf", size=16)`: FreeType reads BDF
   natively and rejects any size but the native one, so the font can't be
   scaled by accident. `ImageFont.load()` on a raw `.bdf` does **not**
@@ -108,6 +110,32 @@ constant. Don't "just reuse `ANIMATION_TICK`" for the scramble effect;
 it will quietly feel slow again. The scramble script names its own
 `SCRAMBLE_TICK` for this reason. Both paces are far below the hardware
 limit: a text-sized region redraws in about 5–6 ms.
+
+## Player screen layout (`experiments/player_screen.py`)
+
+Measured from James's Figma export (`incoming/OLED.png`). Rows 1–2 of the
+export match Spleen renders pixel for pixel, and the prototype's rows 1–2
+match the export exactly.
+
+- **Text area:** x 9–248 (240 px = 30 cols at 8 px, 40 at 6 px, 48 at 5 px).
+- **Row 1:** title, 8x16, cell y 10, white.
+- **Row 2:** `artist | album`, 6x12, cell y 29, white. The `|` is Spleen's
+  own glyph in grey 51.
+- **Row 3:** 5x8, cell y 47, on a 48-column grid:
+
+  | Element | Columns | Grey |
+  |---|---|---|
+  | Elapsed | 0–4 | 121 |
+  | Progress bar | 6–31 (26 slashes) | 111 elapsed, 48 remaining |
+  | Total | 33–37 | 55 |
+  | Counter, right-aligned in a "999/999" field | 41–47 | 158 |
+
+  Row 3 in the export is anti-aliased (not on the pixel grid), so these
+  greys are its peak values. Treat them as a starting point to judge on the
+  panel, especially the level-3 ones (48, 51, 55).
+- **Scrolling** is ported from FD1's `ScrollState` and keeps display.py's
+  pace (3 px per 0.08 s, 1.5 s pauses) by stepping on every 2nd tick of
+  the 0.04 s scramble loop. Each row is clipped to the text area.
 
 ## Grey levels and fullscreen animation cost
 
