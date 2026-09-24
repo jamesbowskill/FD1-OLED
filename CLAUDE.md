@@ -114,26 +114,39 @@ limit: a text-sized region redraws in about 5–6 ms.
 - luma maps an RGB grey value `v` to panel level `floor(v / 16)`
   (`greyscale_device._render_greyscale`), so level 3 is 48–63 and level 2
   is 32–47; e.g. (51,51,51) is level 3 and (34,34,34) is level 2.
-- **Busy-state background (`experiments/scramble_bg_test.py`):** when all
-  210 noise cells changed every 0.04 s tick, it looked too busy on the
-  panel ("panic-inducing"). It also only just held 25 fps (39.7 ms of the
-  40 ms budget, about 81% of one Pi 3B+ core). The background now updates
-  more slowly than the frame rate: `--bg-interval` (default 4 ticks) and
-  `--bg-fraction` (default 0.15 of cells per refresh). The foreground
-  status reveal still runs every tick at 0.04 s, which looks right.
+- **Dim background grey: use level 2 (34,34,34), not level 3.** Level 3
+  (51,51,51) came from rounding Figma's 15% opacity up to the nearest
+  panel level. Compared side by side on the panel, it looked brighter than
+  intended and less refined; level 2 looked more premium and is the
+  validated choice. Don't convert Figma opacities to panel levels by
+  proportion. This is likely because luma sets up the SSD1322 with its
+  linear greyscale table (`0xB9`), while Figma blends in gamma-encoded
+  sRGB. That explanation fits what was seen but hasn't been measured, so
+  judge greys on the panel.
+- **Busy-state background (`experiments/scramble_bg_test.py`), validated
+  defaults:** `--bg-interval 2`, `--bg-fraction 0.15` (32 of 210 cells
+  change every 2nd tick), `--bg-grey 34`, with the status reveal every
+  tick at 0.04 s. Alternatives looked worse on the panel:
+  - every cell on every tick: "panic-inducing";
+  - `--bg-interval 1`: too busy and intense;
+  - `--bg-interval 8 --bg-fraction 0.08`: too pedestrian.
+
+  The interval was the main lever for both how fast it feels and CPU
+  cost; the fraction mattered less.
 - **What that costs on a Pi 3B+, all at 25 fps:**
 
-  | Background | Mean per frame | CPU |
+  | Background | Mean per frame | CPU (one core) |
   |---|---|---|
   | All cells every tick | 39.7 ms | about 81% |
-  | Defaults (32 cells every 4 ticks) | 12 ms | about 25% |
+  | **Validated: 32 cells every 2 ticks, grey 34** | **about 19 ms** | **about 36–40%** |
+  | 32 cells every 4 ticks | 12 ms | about 25% |
   | 17 cells every 8 ticks | 8 ms | about 16% |
 - **Scattered changes cost close to a full frame whatever the fraction.**
   luma's diffing sends one bounding box per 128x32 quarter of the screen,
   so a refresh tick with only 15% of cells changing still costs about
   28–34 ms (versus about 40 ms for all cells). Ticks with no background
-  change cost about 4.5 ms. `--bg-interval` is the main CPU lever;
-  `--bg-fraction` mostly controls how busy it looks.
+  change cost about 4.5 ms. The grey level doesn't affect cost (any
+  non-black pixel takes the same path in luma's packing loop).
 
 ## luma.core blanks the display on process exit unless `persist=True`
 

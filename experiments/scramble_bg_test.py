@@ -57,9 +57,9 @@ class StatusReveal:
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tick", type=float, default=SCRAMBLE_TICK, help="seconds per frame")
-    parser.add_argument("--bg-grey", type=int, default=51,
-                        help="noise grey 0-255 (51 = panel level 3, 34 = level 2)")
-    parser.add_argument("--bg-interval", type=int, default=4,
+    parser.add_argument("--bg-grey", type=int, default=34,
+                        help="noise grey 0-255 (34 = panel level 2, 51 = level 3)")
+    parser.add_argument("--bg-interval", type=int, default=2,
                         help="background may refresh only every N ticks")
     parser.add_argument("--bg-fraction", type=float, default=0.15,
                         help="fraction of background cells that change per refresh (0-1)")
