@@ -148,10 +148,10 @@ def visible_edges(groups, angle):
     return edges
 
 
-def project(pts, centre, face_height, angle, screen_xy, height_px):
-    """Rotate around the vertical axis through the disc centre, then
-    perspective-project so the z=0 face is height_px tall at 0 deg, centred
-    on screen_xy."""
+def project(pts, centre, face_height, angle, screen_xy, height_px, axis="y"):
+    """Rotate around the disc centre's vertical ("y") or horizontal ("x")
+    axis, then perspective-project so the z=0 face is height_px tall at
+    0 deg, centred on screen_xy."""
     cx, cy, cz = centre
     sx, sy = screen_xy
     scale = height_px / face_height
@@ -159,16 +159,20 @@ def project(pts, centre, face_height, angle, screen_xy, height_px):
     out = []
     for x, y, z in pts:
         x, y, z = x - cx, y - cy, z - cz
-        xr, zr = x * c + z * s, -x * s + z * c
-        k = scale * (CAMERA_DISTANCE - (0.0 - cz)) / (CAMERA_DISTANCE - zr)
-        out.append((sx + xr * k, sy + y * k))
+        if axis == "y":
+            x, z = x * c + z * s, -x * s + z * c
+        else:
+            y, z = y * c - z * s, y * s + z * c
+        k = scale * (CAMERA_DISTANCE - (0.0 - cz)) / (CAMERA_DISTANCE - z)
+        out.append((sx + x * k, sy + y * k))
     return out
 
 
-def draw_disc(draw, model, angle, screen_xy, height_px, outline_only=False):
-    """Draw one disc instance (no canvas clear), face-gated unless outline_only."""
+def draw_disc(draw, model, angle, screen_xy, height_px, outline_only=False, axis="y"):
+    """Draw one disc instance (no canvas clear), face-gated unless outline_only.
+    Gating uses cos(angle), which holds for either single rotation axis."""
     pts, groups, centre, face_height = model
-    proj = project(pts, centre, face_height, angle, screen_xy, height_px)
+    proj = project(pts, centre, face_height, angle, screen_xy, height_px, axis)
     edges = groups["always"] if outline_only else visible_edges(groups, angle)
     for a, b in edges:
         draw.line((proj[a], proj[b]), fill="white", width=LINE_WIDTH)

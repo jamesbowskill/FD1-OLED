@@ -183,25 +183,42 @@ the scene changing every few beats.
 - **Timing:** `BEAT_SECONDS` (1) and `SCENE_BEATS` (4). Frames are
   counted (25 per beat at the 0.04 s tick), and progress through the beat
   and the scene index come from the frame number, not the wall clock.
-- **Scenes are data:** a `Scene(name, discs, motion, base_deg, text)`,
-  where `discs` is a tuple of `(x, y, height_px)` placements. Layout
-  helpers generate them: `grid`, `row`, `packed_row` (mixed sizes side by
-  side) and `brick` (offset rows). All discs in a scene share one motion.
-  A scene with `text` and no discs is a typography scene. Adding or tuning
-  a scene means editing `SCENES`, never the render loop. The sequence
-  loops.
-- **Motion types, eased with `(1 - cos πp) / 2`:**
+- **Scenes are data:** a `Scene(name, discs, motion, base_deg, axis, duty,
+  spread, slide_px, text)`, where `discs` is a tuple of
+  `(x, y, height_px[, sign])` placements.
+  - Layout helpers generate the placements: `grid`, `row`, `packed_row`
+    (mixed sizes side by side), `brick` (offset rows), and `signed`
+    (attaches a per-disc direction).
+  - A scene with `text` and no discs is a typography scene.
+  - Scenes live in `BATCH_A` and `BATCH_B`. `BATCHES` maps `a`, `b` and
+    `all` to a loop that ends with the INSERT DISK scene.
+  - Adding or tuning a scene means editing a batch, never the render loop.
+- **Motions.** `motion` is one name or a tuple of names to combine (e.g.
+  `("hop", "rock")`):
   - `reset`: a full 360° per beat, landing on the start orientation.
-  - `rock`: out `ROCK_DEGREES` (60) from `base_deg` and back within the
-    beat, pendulum-style. `base_deg = -30` swings -30° to +30°.
+  - `rock`: out `ROCK_DEGREES` (60) from `base_deg` and back,
+    pendulum-style. `base_deg = -30` swings -30° to +30°.
+  - `flipflop`: 180° per beat, so alternate beats show front, then back.
+  - `hop`: up `HOP_PX` (8) and back down.
+  - `pulse`: grows by `PULSE_GROWTH` (0.2) and shrinks back.
+  - `conveyor`: slides `slide_px` sideways, wrapping round the panel
+    edges.
+- **Per-scene modifiers:**
+  - `axis="x"` flips discs top-over-bottom instead of turning them. The
+    back then comes up upside down, as a real disc would.
+  - `duty` moves in the first part of the beat, then holds (staccato).
+  - `spread` staggers each disc's start by its x position, making a wave
+    that breaks strict unison.
+  - A disc's sign of -1 mirrors its rotation and slide direction
+    (counter-rotation, opposing conveyors).
 
-  Both end each beat back at `base_deg`, so scene cuts land with the
-  discs at rest.
+  Progress is eased with `(1 - cos πq)`/2. Every motion ends each beat at
+  rest, so scene cuts land cleanly.
 - **Small discs are 12 px** (`SMALL_DISC_PX`). 24 px also looked good, but
   12 px was chosen for headroom; scenes can still use larger discs where
   the layout needs them.
-- **Current sequence and cost** (Pi 3B+, all 25.0 fps, consistent over
-  two loops):
+- **Batch A sequence and cost** (`--batch a`, the default; Pi 3B+, all
+  25.0 fps, consistent over two loops):
 
   | # | Scene | Discs | Motion | ms/frame | CPU |
   |---|---|---|---|---|---|
@@ -215,13 +232,39 @@ the scene changing every few beats.
   | 8 | 3x8 grid | 24 × 12 px | rock ±30° | 30 | 65% |
   | 9 | INSERT DISK | text (Spleen 8x16) | none | 2 | 5% |
 
-  Spikes up to about 55 ms happen mostly on scene cuts, where the whole
-  screen changes at once, and the deadline loop catches up. Scenes have
-  been checked offline to stay inside the panel with no discs
-  overlapping through the whole beat.
+- **Batch B sequence and cost** (`--batch b`; all 25.0 fps over two
+  loops):
+
+  | # | Scene | Discs | Motion | ms/frame | CPU |
+  |---|---|---|---|---|---|
+  | 1 | Two conveyors | 2 rows × 8 × 20 px, opposite ways | conveyor | 31.5 | 67% |
+  | 2 | Heartbeat | 1 × 40 px at -25° | pulse, duty 0.35 | 5 | 12% |
+  | 3 | Ripple | 2x8 × 12 px | reset, spread 0.5 | 16 | 37% |
+  | 4 | Tumble | 4 × 40 px | reset, x axis | 18.5 | 39% |
+  | 5 | Hop and sway | 7 × 24 px, alternating | hop + rock | 20 | 42% |
+  | 6 | Domino | 3x8 × 12 px | reset, x axis, spread 0.7 | 19.5 | 45% |
+  | 7 | Flip-flop staccato | 8 × 24 px | flipflop, duty 0.3 | 10 | 22% |
+  | 8 | Gears | 2x6 × 20 px, checkerboard | reset | 28 | 59% |
+  | 9 | INSERT DISK | text | none | 2 | 5% |
+
+- **Notes on cost:**
+  - Spikes up to about 55–68 ms happen mostly on scene cuts (the whole
+    screen changes at once) and in the conveyor scene; the deadline loop
+    catches up.
+  - **Holding still is nearly free.** A held frame is identical to the one
+    before, so luma sends almost nothing. That's why `duty` (move then
+    hold) and `spread` (only part of the grid moving at once) are
+    performance levers as well as design ones: domino's 24 discs cost
+    less than batch A's 3x8 grid.
+  - Every scene has been checked offline (every frame of four beats) to
+    stay inside the panel with no discs overlapping. The conveyor
+    deliberately wraps across the edges.
 - **Flags:**
-  - `--scene N` loops one scene, for tuning.
-  - `--stills DIR` writes PNGs at quarter-beat steps without the panel.
+  - `--batch a|b|all` picks the loop.
+  - `--scene N` loops one scene of that batch, for tuning.
+  - `--stills DIR` writes PNGs at quarter-beat steps.
+  - `--gif PATH` renders one loop as an animated GIF at the live frame
+    rate, 2x scale, for reviewing motion away from the panel.
   - `--outline-only` draws outlines only.
   - `--tick` sets the frame length.
 - **Phase 1 benchmark** (worst case: 16 discs in a 2x8 grid, reset motion,
