@@ -13,6 +13,15 @@ rig's wiring, which has also been physically verified).
   greyscale test bar) instead of leaving the screen blank — this only
   checks at startup, not on every file removal, so emptying `incoming/`
   afterward doesn't bring the default back until the next restart.
+- `oled_common.py` — shared setup every script should use instead of its own
+  init: `get_device()` returns a configured `ssd1322` (this rig's wiring,
+  `persist=True`; extra kwargs such as `framebuffer=` pass through) and
+  calls `check_gpio_free()` first, which raises with the holding PID if
+  `/dev/gpiochip0` is already in use.
+- `experiments/` — scratch space for one-off tests. Things that prove out
+  graduate to top-level scripts; things that don't can stay here or be
+  deleted later. Scripts here add the repo root to `sys.path` to import
+  `oled_common`.
 - `venv/` — Python venv with `luma.core`, `luma.oled`, `Pillow`, `watchdog`,
   etc. Always run scripts with `venv/bin/python3`, not system Python.
 - `oled-watcher.service` (`/etc/systemd/system/oled-watcher.service`) — runs
