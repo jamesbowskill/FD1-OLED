@@ -97,6 +97,41 @@ separate runs.
 - Per-frame time depends on content: black pixels skip work in the packing
   loop, so all-black frames are faster than bright or busy ones.
 
+## Rotating wireframe cost (`experiments/wireframe_benchmark.py`, 2026-09-24)
+
+Synthetic stand-in geometry (not the real disc). It rotates at 120°/s
+around the vertical axis with a live rotation matrix and perspective, is
+drawn with `ImageDraw.line()` each frame, and uses luma's default diffing.
+Measured on the Pi 3B+:
+
+| Case | Edges | Max fps | ms/frame (draw + display) | CPU at 25 fps |
+|---|---|---|---|---|
+| Disc-sized proxy, centred (about 56x60 px) | 28 | 128 | 7.8 (0.4 + 7.4) | about 23% |
+| Dense proxy, centred | 172 | 102 | 9.8 (1.7 + 8.0) | |
+| Four disc proxies across the full width | 112 | 34.5 | 29.0 (1.2 + 27.8) | about 58% |
+| Four dense proxies across the full width | 688 | 28 | 35.5 (6.2 + 29.2) | |
+| Disc proxy, centred, `full_frame()` | 28 | 31 | 31.9 | |
+
+- **On-screen footprint sets the cost, not edge count.** The expensive part
+  is luma packing the changed region; the rotation maths and Pillow's line
+  drawing are about 0.4 ms for disc-level geometry. Six times the edges at
+  the same footprint adds about 2 ms. Four copies across the width cost
+  nearly four times as much as one centred copy.
+- **A single centred disc (at most 64 px) is cheap**, at about 5x the
+  headroom needed for 25 fps. Full redraw of the canvas each frame with
+  luma's diffing is enough; no special strategy is needed.
+- **Broad full-width motion approaches full-frame cost** (about 30–36 ms),
+  so it only just holds 25 fps, like the busy-state background.
+- **Mostly-black line art is cheaper to pack than solid frames.** A full
+  frame of wireframe costs about 32 ms (31 fps), against 44 ms for
+  fps_benchmark's alternating solid frames.
+- **Benchmark method: move by a fixed amount per frame, not by elapsed
+  time.** With time-based motion, an unthrottled loop moves only a fraction
+  of a degree per frame, so luma's diff sends almost nothing and fps
+  inflates itself. The first run of this benchmark reported 319 fps for the
+  disc, versus 128 fps with a fixed 4.8° per frame (the per-frame step at
+  25 fps).
+
 ## Animation pace: scramble-decode and scrolling need different ticks
 
 On the real panel, the scramble-decode reveal
