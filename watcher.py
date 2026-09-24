@@ -10,11 +10,11 @@ black/white.
 import time
 from pathlib import Path
 
-from luma.core.interface.serial import spi
-from luma.oled.device import ssd1322
 from PIL import Image
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+from oled_common import get_device
 
 INCOMING_DIR = Path.home() / "oled" / "incoming"
 DEFAULT_IMAGE = Path.home() / "oled" / "default.png"
@@ -77,13 +77,7 @@ class PngHandler(FileSystemEventHandler):
 def main():
     INCOMING_DIR.mkdir(parents=True, exist_ok=True)
 
-    serial = spi(port=0, device=0, gpio_DC=5, gpio_RST=6)
-    device = ssd1322(serial)
-    # luma.core registers an atexit hook that blanks the display on process
-    # exit unless persist=True — irrelevant for this long-running watcher,
-    # but set explicitly so it can't be silently reintroduced if this
-    # script's structure changes later (see CLAUDE.md).
-    device.persist = True
+    device = get_device()
 
     show_default_if_empty(device)
 
