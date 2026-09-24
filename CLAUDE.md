@@ -113,29 +113,48 @@ limit: a text-sized region redraws in about 5–6 ms.
 
 ## Player screen layout (`experiments/player_screen.py`)
 
-Measured from James's Figma export (`incoming/OLED.png`). Rows 1–2 of the
-export match Spleen renders pixel for pixel, and the prototype's rows 1–2
-match the export exactly.
+Positions measured from James's Figma export (`incoming/OLED.png`). Rows
+1–2 of the export match Spleen renders pixel for pixel, and the
+prototype's rows 1–2 match the export exactly.
 
 - **Text area:** x 9–248 (240 px = 30 cols at 8 px, 40 at 6 px, 48 at 5 px).
+- **Greys:** only two, white (255) and dim (34,34,34, panel level 2).
 - **Row 1:** title, 8x16, cell y 10, white.
 - **Row 2:** `artist | album`, 6x12, cell y 29, white. The `|` is Spleen's
-  own glyph in grey 51.
+  own glyph in dim.
 - **Row 3:** 5x8, cell y 47, on a 48-column grid:
 
   | Element | Columns | Grey |
   |---|---|---|
-  | Elapsed | 0–4 | 121 |
-  | Progress bar | 6–31 (26 slashes) | 111 elapsed, 48 remaining |
-  | Total | 33–37 | 55 |
-  | Counter, right-aligned in a "999/999" field | 41–47 | 158 |
-
-  Row 3 in the export is anti-aliased (not on the pixel grid), so these
-  greys are its peak values. Treat them as a starting point to judge on the
-  panel, especially the level-3 ones (48, 51, 55).
+  | Elapsed | 0–4 | white |
+  | Progress bar | 6–31 (26 slashes) | white played, dim remaining |
+  | Total | 33–37 | dim |
+  | Counter, right-aligned in a "999/999" field | 41–47 | white |
+- **Scrambles:**
+  - Every element scrambles in once, on the first paint.
+  - After that, the title re-scrambles on every track change, and
+    `artist | album` only when that string changes (ScrollState's
+    `set_text` dirty-check).
+  - Row 3 never scrambles after the first paint. It resets and updates
+    silently, including on track changes.
 - **Scrolling** is ported from FD1's `ScrollState` and keeps display.py's
   pace (3 px per 0.08 s, 1.5 s pauses) by stepping on every 2nd tick of
   the 0.04 s scramble loop. Each row is clipped to the text area.
+
+Two corrections made after watching the panel (2026-09-24):
+1. **Counter and total no longer scramble on track change.** The first
+   version re-scrambled them alongside the title. They now follow the same
+   rule as elapsed and the bar, which leaves Row 3 calm and the title (plus
+   `artist | album` when it changes) as the only thing that moves on a
+   track change.
+2. **The dim greys are now the validated level 2.** Row 3's first greys
+   (121, 111, 48, 55, 158) were peak values read off an anti-aliased Figma
+   export, not tested on the panel, and the `|` used Figma's 51 (level 3,
+   which the busy-state test found too bright). The dim elements (remaining
+   bar, total, `|`) now use (34,34,34), the grey validated for the
+   busy-state background; elapsed, the played bar and the counter are
+   white. Level 2 was validated as background texture, so check that the
+   total duration is still easy enough to read at 5x8.
 
 ## Grey levels and fullscreen animation cost
 

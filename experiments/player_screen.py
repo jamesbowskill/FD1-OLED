@@ -7,15 +7,15 @@ triggers, driven by a mock playlist (no mpv/jukebox).
   Row 3  elapsed, progress bar, total, track counter   Spleen 5x8
 
 Scramble rules:
-  - Title, total and counter re-scramble on every track change, together;
-    a track change interrupts whatever is in flight.
-  - Artist | album re-scrambles only if that string actually changed.
-  - Elapsed and progress bar never scramble, except once in the initial
-    paint when every element scrambles in; after that they reset and
-    update silently.
-Positions and greys come from James's Figma export (incoming/OLED.png):
-rows 1-2 match Spleen renders pixel for pixel; row 3 sits on the same
-5px grid, with greys taken from the export.
+  - Every element scrambles in once, on the initial paint.
+  - After that, the title re-scrambles on every track change, interrupting
+    whatever is in flight; artist | album re-scrambles only if that string
+    actually changed.
+  - Row 3 (elapsed, bar, total, counter) never scrambles again: it resets
+    and updates silently, including on track changes.
+Positions come from James's Figma export (incoming/OLED.png): rows 1-2
+match Spleen renders pixel for pixel; row 3 sits on the same 5px grid.
+Greys are white or the panel-validated dim level 2 (34,34,34).
 """
 
 import argparse
@@ -42,12 +42,8 @@ TEXT_WIDTH = 240  # x 9..248: 30 cols at 8px, 40 at 6px, 48 at 5px
 ROW1_Y, ROW2_Y, ROW3_Y = 10, 29, 47
 
 WHITE = (255, 255, 255)
-PIPE_GREY = (51, 51, 51)
-ELAPSED_GREY = (121, 121, 121)
-BAR_DONE_GREY = (111, 111, 111)
-BAR_TODO_GREY = (48, 48, 48)
-TOTAL_GREY = (55, 55, 55)
-COUNTER_GREY = (158, 158, 158)
+# Panel level 2, validated on the panel for the busy-state background.
+DIM = (34, 34, 34)
 
 # Row 3 columns on the 5px grid (48 cols from x=9).
 ELAPSED_COL = 0
@@ -206,26 +202,32 @@ def main():
             track = index
             title.set_text(name, force=True)
             row2_changed = artist_album.set_text(f"{artist} | {album}")
-            row3["total"].set_text(mmss(duration), force=True)
-            row3["counter"].set_text(f"{index + 1}/{len(PLAYLIST)}".rjust(COUNTER_WIDTH), force=True)
-            if first:
-                row3["elapsed"].set_text(mmss(elapsed), force=True)
-                row3["bar"].set_text("/" * BAR_LEN, force=True)
+            row3_text = {
+                "elapsed": mmss(elapsed),
+                "bar": "/" * BAR_LEN,
+                "total": mmss(duration),
+                "counter": f"{index + 1}/{len(PLAYLIST)}".rjust(COUNTER_WIDTH),
+            }
+            for key, text in row3_text.items():
+                if first:
+                    row3[key].set_text(text, force=True)
+                else:
+                    row3[key].update_text(text)
             print(f"track {index + 1}: {name!r}; artist|album "
                   f"{'re-scrambled' if row2_changed else 'unchanged, not re-scrambled'}"
-                  f"{'; initial paint, everything scrambles in' if first else ''}")
+                  f"{'; initial paint, everything scrambles in' if first else '; row 3 updated silently'}")
         row3["elapsed"].update_text(mmss(elapsed))
 
         draw.rectangle((0, 0, device.width - 1, device.height - 1), fill="black")
         draw_scrolling(title, 16, ROW1_Y)
-        draw_scrolling(artist_album, 12, ROW2_Y, pipe_grey=PIPE_GREY)
-        draw_row3_text(row3["elapsed"], ELAPSED_COL, ELAPSED_GREY)
+        draw_scrolling(artist_album, 12, ROW2_Y, pipe_grey=DIM)
+        draw_row3_text(row3["elapsed"], ELAPSED_COL, WHITE)
         bar = row3["bar"].visible_text()
-        draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar, font=fonts[8], fill=BAR_TODO_GREY)
+        draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar, font=fonts[8], fill=DIM)
         if bar_done:
-            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=fonts[8], fill=BAR_DONE_GREY)
-        draw_row3_text(row3["total"], TOTAL_COL, TOTAL_GREY)
-        draw_row3_text(row3["counter"], COUNTER_COL, COUNTER_GREY)
+            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=fonts[8], fill=WHITE)
+        draw_row3_text(row3["total"], TOTAL_COL, DIM)
+        draw_row3_text(row3["counter"], COUNTER_COL, WHITE)
 
         device.display(canvas)
         frame_ms.append((time.perf_counter() - t0) * 1000)
