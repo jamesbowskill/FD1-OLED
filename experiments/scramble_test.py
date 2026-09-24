@@ -30,7 +30,9 @@ FONTS = {
     16: ROOT / "fonts" / "spleen" / "spleen-8x16.bdf",
 }
 NOISE = string.ascii_uppercase + string.digits + "!#$%&*+-=?@<>/\\|~^"
-ANIMATION_TICK = 0.08  # display.py's cadence (~12.5 fps)
+# ~25 fps. Deliberately not display.py's ANIMATION_TICK (0.08): 0.08 looked
+# too slow for this effect on the real panel (see CLAUDE.md).
+SCRAMBLE_TICK = 0.04
 TEXT_X, TEXT_Y = 4, 12  # display.py's LEFT_MARGIN / LINE1_Y
 MIN_NOISE_FRAMES = 3
 
@@ -66,7 +68,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("text", nargs="?", default="SURE SHOT")
     parser.add_argument("--size", type=int, choices=sorted(FONTS), default=16)
-    parser.add_argument("--tick", type=float, default=ANIMATION_TICK, help="seconds per frame")
+    parser.add_argument("--tick", type=float, default=SCRAMBLE_TICK, help="seconds per frame")
     parser.add_argument("--duration", type=float, default=1.6, help="seconds for the whole reveal")
     parser.add_argument("--hold", type=float, default=2.0, help="seconds to hold the final text")
     parser.add_argument("--seed", type=int, help="fix the random pattern to compare settings")

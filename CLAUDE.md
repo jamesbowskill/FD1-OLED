@@ -95,6 +95,20 @@ separate runs.
 - Per-frame time depends on content: black pixels skip work in the packing
   loop, so all-black frames are faster than bright or busy ones.
 
+## Animation pace: scramble-decode and scrolling need different ticks
+
+On the real panel, the scramble-decode reveal
+(`experiments/scramble_test.py`) looks right at a **0.04 s tick (~25 fps)**.
+At display.py's scroll cadence (`ANIMATION_TICK = 0.08`, ~12.5 fps) it
+looked too slow and chunky. A faster global tick alone fixed it;
+per-position randomised noise timing was considered and not needed.
+
+These are two animation types with two natural paces, not one shared
+constant. Don't "just reuse `ANIMATION_TICK`" for the scramble effect;
+it will quietly feel slow again. The scramble script names its own
+`SCRAMBLE_TICK` for this reason. Both paces are far below the hardware
+limit: a text-sized region redraws in about 5–6 ms.
+
 ## luma.core blanks the display on process exit unless `persist=True`
 
 `luma.core.device.device.__init__` registers an `atexit` hook that calls
