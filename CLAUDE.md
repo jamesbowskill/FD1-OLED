@@ -109,6 +109,19 @@ it will quietly feel slow again. The scramble script names its own
 `SCRAMBLE_TICK` for this reason. Both paces are far below the hardware
 limit: a text-sized region redraws in about 5–6 ms.
 
+## Grey levels and fullscreen animation cost
+
+- luma maps an RGB grey value `v` to panel level `floor(v / 16)`
+  (`greyscale_device._render_greyscale`), so level 3 is 48–63 and level 2
+  is 32–47; e.g. (51,51,51) is level 3 and (34,34,34) is level 2.
+- A fullscreen effect that changes every row every tick defeats luma's
+  diffing. `experiments/scramble_bg_test.py` (5 rows of Spleen 6x12 noise)
+  holds 25 fps at a 0.04 s tick, but only just: render + push averages
+  about 39.7 ms of the 40 ms budget, with spikes to about 61 ms, and uses
+  about 81% of one Pi 3B+ core. On FD1 it would share that CPU with mpv
+  and the other services, so expect dropped frames there unless the
+  packing gets faster or the background updates less often.
+
 ## luma.core blanks the display on process exit unless `persist=True`
 
 `luma.core.device.device.__init__` registers an `atexit` hook that calls
