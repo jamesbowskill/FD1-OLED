@@ -3,15 +3,14 @@
 
 Model (SVG units, 94x98 canvas; +z points toward the viewer):
   outline.svg  at z=0 and z=DISC_DEPTH, joined point-to-point (extrusion)
-  front.svg    at z=0
-  media.svg    at z=MEDIA_DEPTH (the magnetic disk, recessed in the shell)
+  front.svg    at z=0 (shutter, window, label)
   back.svg     at z=DISC_DEPTH, x mirrored (x -> width - x): it was drawn
-               as seen with the disc flipped over
+               as seen with the disc flipped over (shutter, window, label, hub)
 
 Face gating: the outline and extrusion always draw; front.svg's details
-draw only while the front faces the viewer, media.svg's and back.svg's only
-while the back does (facing = cos(angle), single-axis rotation), each with
-FACE_OVERLAP of slack around edge-on.
+draw only while the front faces the viewer, back.svg's only while the back
+does (facing = cos(angle), single-axis rotation), each with FACE_OVERLAP of
+slack around edge-on.
 
 Live mode spins at a fixed DEG_PER_FRAME on deadline ticks (not elapsed
 time, so frame cost stays honest; see CLAUDE.md). --stills DIR renders PNGs
@@ -33,8 +32,7 @@ from PIL import Image, ImageDraw
 ASSETS = Path(__file__).resolve().parent.parent / "assets" / "disc"
 
 # Tune by eye on the panel.
-DISC_DEPTH = -10.0              # SVG units; exaggerated, real ratio won't read
-MEDIA_DEPTH = DISC_DEPTH / 2
+DISC_DEPTH = -6.5               # SVG units; exaggerated, real ratio won't read
 LINE_WIDTH = 1
 FACE_OVERLAP = 0.0              # facing slack at edge-on; >0 shows both groups briefly
 DEG_PER_FRAME = 4.8             # 120 deg/s at 25 fps
@@ -103,32 +101,40 @@ def load_svg(name):
 def build_model():
     """Return (points3d, edge groups, centre, face height) in SVG units.
 
-    Edge groups: "always" (outline + extrusion), "front", "back" (back
-    details and media)."""
+    Edge groups: "always" (outline + extrusion), "front", "back"."""
     pts = []
     groups = {"always": [], "front": [], "back": []}
 
-    def add(group, path_pts, closed, z, mirror_width=None):
+    outline, width, height = load_svg("outline.svg")
+    ox = [x for p, _ in outline for x, _ in p]
+    oy = [y for p, _ in outline for _, y in p]
+
+    def add(group, path_pts, closed, z, mirror_width=None, clamp=False):
         start = len(pts)
         for x, y in path_pts:
-            pts.append((mirror_width - x if mirror_width else x, y, z))
+            if mirror_width:
+                x = mirror_width - x
+            if clamp:
+                # Figma centres the outline's 1px stroke on half-units (0.5,
+                # 97.5); details drawn to the canvas edge (0, 98) would
+                # otherwise poke 1px past it face-on.
+                x = min(max(x, min(ox)), max(ox))
+                y = min(max(y, min(oy)), max(oy))
+            pts.append((x, y, z))
         n = len(path_pts)
         groups[group].extend((start + k, start + k + 1) for k in range(n - 1))
         if closed and n > 2:
             groups[group].append((start + n - 1, start))
         return start
 
-    outline, width, height = load_svg("outline.svg")
     for path_pts, closed in outline:
         front_start = add("always", path_pts, closed, 0.0)
         back_start = add("always", path_pts, closed, DISC_DEPTH)
         groups["always"].extend((front_start + k, back_start + k) for k in range(len(path_pts)))
     for path_pts, closed in load_svg("front.svg")[0]:
-        add("front", path_pts, closed, 0.0)
-    for path_pts, closed in load_svg("media.svg")[0]:
-        add("back", path_pts, closed, MEDIA_DEPTH)
+        add("front", path_pts, closed, 0.0, clamp=True)
     for path_pts, closed in load_svg("back.svg")[0]:
-        add("back", path_pts, closed, DISC_DEPTH, mirror_width=width)
+        add("back", path_pts, closed, DISC_DEPTH, mirror_width=width, clamp=True)
     return pts, groups, (width / 2, height / 2, DISC_DEPTH / 2), height
 
 

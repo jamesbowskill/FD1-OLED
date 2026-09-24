@@ -140,25 +140,32 @@ parser.
 
 - **Model:**
   - `outline.svg` at z=0 and z=`DISC_DEPTH`, joined point-to-point.
-  - `front.svg` at z=0.
-  - `media.svg` at `MEDIA_DEPTH`.
+  - `front.svg` at z=0: shutter, window, tall label (y 45–98).
   - `back.svg` at `DISC_DEPTH`, x mirrored (`94 - x`), because it was drawn
-    as seen with the disc flipped over. After mirroring, its shutter and
-    window land exactly on the front's.
-  - 74 points; +z points toward the viewer.
+    as seen with the disc flipped over: shutter, window, short label strip
+    (y 83–98), hub. After mirroring, its shutter and window land exactly
+    on the front's, and both labels are centred (x 10–84).
+  - 62 points, 63 edges; +z points toward the viewer.
+  - The design is opaque: the earlier `media.svg` (a visible magnetic
+    disc) was dropped.
 - **Face gating:** outline and extrusion always draw. `front.svg` draws
-  while `cos(angle) > -FACE_OVERLAP`, and `media.svg` + `back.svg` while
-  `cos(angle) < FACE_OVERLAP`. Without gating, both faces' shutters and
-  the hub showed through at once and angled views were cluttered.
-  `FACE_OVERLAP` defaults to 0 (a hard swap at edge-on): in captured
-  frames, 0.1 drew both groups squashed into the edge-on sliver, making a
-  white clump.
-- **Tuning constants at the top of the file:** `DISC_DEPTH` (-10),
-  `MEDIA_DEPTH` (half of `DISC_DEPTH`), `LINE_WIDTH`, `FACE_OVERLAP`,
-  `DEG_PER_FRAME` (4.8, i.e. 120°/s at 25 fps), `DISC_HEIGHT_PX` (48),
-  `CAMERA_DISTANCE`.
+  while `cos(angle) > -FACE_OVERLAP`, and `back.svg` while
+  `cos(angle) < FACE_OVERLAP`. Without gating, both faces' details showed
+  through at once and angled views were cluttered. `FACE_OVERLAP` defaults
+  to 0 (a hard swap at edge-on): in captured frames, 0.1 drew both groups
+  squashed into the edge-on sliver, making a white clump.
+- **Detail points are clamped to the outline's bounds.** Figma centres
+  the outline's 1 px stroke on half-units (0.5, 97.5), while details are
+  drawn to the canvas edge (0, 98). Unclamped, the shutter tops and label
+  bottoms poked 1 px past the outline when face-on.
+- **Tuning constants at the top of the file:** `DISC_DEPTH` (-6.5),
+  `LINE_WIDTH`, `FACE_OVERLAP`, `DEG_PER_FRAME` (4.8, i.e. 120°/s at
+  25 fps), `DISC_HEIGHT_PX` (48), `CAMERA_DISTANCE`.
+  - `DISC_DEPTH` -6.5 gives a clean 4 px edge-on sliver.
+  - -7 rounds to 6 px, and the front details squashed into the sliver
+    show as stray fragments.
 - **Performance at 25 fps on the Pi 3B+:** about 9–11 ms per frame, about
-  21–26% of one core.
+  20–25% of one core.
 - **Checking geometry changes:** `--stills DIR` renders PNGs at 45° steps
   without the panel.
 
