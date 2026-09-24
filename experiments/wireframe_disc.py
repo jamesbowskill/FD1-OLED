@@ -148,28 +148,35 @@ def visible_edges(groups, angle):
     return edges
 
 
-def project(pts, centre, face_height, angle, size=PANEL_SIZE):
+def project(pts, centre, face_height, angle, screen_xy, height_px):
     """Rotate around the vertical axis through the disc centre, then
-    perspective-project so the z=0 face is DISC_HEIGHT_PX tall at 0 deg."""
+    perspective-project so the z=0 face is height_px tall at 0 deg, centred
+    on screen_xy."""
     cx, cy, cz = centre
-    w, h = size
-    scale = DISC_HEIGHT_PX / face_height
+    sx, sy = screen_xy
+    scale = height_px / face_height
     c, s = math.cos(angle), math.sin(angle)
     out = []
     for x, y, z in pts:
         x, y, z = x - cx, y - cy, z - cz
         xr, zr = x * c + z * s, -x * s + z * c
         k = scale * (CAMERA_DISTANCE - (0.0 - cz)) / (CAMERA_DISTANCE - zr)
-        out.append((w / 2 + xr * k, h / 2 + y * k))
+        out.append((sx + xr * k, sy + y * k))
     return out
 
 
-def render(draw, model, angle, size=PANEL_SIZE):
+def draw_disc(draw, model, angle, screen_xy, height_px, outline_only=False):
+    """Draw one disc instance (no canvas clear), face-gated unless outline_only."""
     pts, groups, centre, face_height = model
-    proj = project(pts, centre, face_height, angle, size)
-    draw.rectangle((0, 0, size[0] - 1, size[1] - 1), fill="black")
-    for a, b in visible_edges(groups, angle):
+    proj = project(pts, centre, face_height, angle, screen_xy, height_px)
+    edges = groups["always"] if outline_only else visible_edges(groups, angle)
+    for a, b in edges:
         draw.line((proj[a], proj[b]), fill="white", width=LINE_WIDTH)
+
+
+def render(draw, model, angle, size=PANEL_SIZE):
+    draw.rectangle((0, 0, size[0] - 1, size[1] - 1), fill="black")
+    draw_disc(draw, model, angle, (size[0] / 2, size[1] / 2), DISC_HEIGHT_PX)
 
 
 def render_stills(out_dir, angles=STILL_ANGLES):

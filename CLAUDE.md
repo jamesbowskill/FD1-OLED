@@ -168,6 +168,52 @@ parser.
   20–25% of one core.
 - **Checking geometry changes:** `--stills DIR` renders PNGs at 45° steps
   without the panel.
+- **Drawing one instance:** `draw_disc(draw, model, angle, screen_xy,
+  height_px, outline_only=False)` draws a disc at any position and size
+  without clearing the canvas. Build the model once with `build_model()`
+  and share it; `disk_rhythm.py` uses this for every disc. The
+  perspective is defined relative to the disc, so it looks the same at any
+  size.
+
+## Disc rhythm screensaver (`experiments/disk_rhythm.py`)
+
+For the INSERT DISK moment: many discs animating on a steady beat, with
+the scene changing every few beats.
+
+- **Timing:** `BEAT_SECONDS` (1) and `SCENE_BEATS` (4). Frames are
+  counted (25 per beat at the 0.04 s tick), and progress through the beat
+  and the scene index come from the frame number, not the wall clock.
+- **Scenes are data:** a `Scene(name, discs, motion, base_deg)`, where
+  `discs` is a tuple of `(x, y, height_px)` placements (layout helpers
+  such as `grid(cols, rows, height_px)` generate them). All discs in a
+  scene share one motion. Adding or tuning a scene never touches the
+  render loop.
+- **Motion types, eased with `(1 - cos πp) / 2`:**
+  - `reset`: a full 360° per beat, landing on the start orientation.
+  - `rock`: out `ROCK_DEGREES` (60) and back within the beat,
+    pendulum-style.
+- **Phase 1 cost** (worst case: 16 discs in a 2x8 grid, reset motion,
+  Pi 3B+). Every configuration held 25 fps:
+
+  | Disc size | Detail | luma diff segments | ms/frame | CPU |
+  |---|---|---|---|---|
+  | 12 px (¼ of the 48 px disc) | face-gated | 4 (default) | 21.4 | 47% |
+  | 12 px | outline only | 4 | 18.0 | 39% |
+  | 12 px | face-gated | 16 | 23.0 | 53% |
+  | 12 px | face-gated | 64 | 28.5 | 68% |
+  | 24 px | face-gated | 4 | 36.0 | 76% |
+  | 24 px | face-gated | 16 | 38.7 | 84% |
+
+  - Drawing 16 discs costs about 7 ms whatever their size (Python point
+    maths), or about 4.3 ms outline-only. The rest is luma packing the
+    changed area: about 15 ms at 12 px and about 29 ms at 24 px.
+  - **Finer diff segments make it slower.** More segments tighten the
+    changed boxes, but each segment adds its own diff and SPI window
+    setup, which outweighs the saving. Keep luma's default of 4.
+  - Budget scenes by total on-screen disc area, not by disc count or
+    detail.
+  - Nothing is playing at INSERT DISK, so mpv isn't competing for the
+    CPU the way it would be on the player screen.
 
 ## Animation pace: scramble-decode and scrolling need different ticks
 
