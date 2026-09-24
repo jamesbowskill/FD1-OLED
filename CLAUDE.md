@@ -183,16 +183,48 @@ the scene changing every few beats.
 - **Timing:** `BEAT_SECONDS` (1) and `SCENE_BEATS` (4). Frames are
   counted (25 per beat at the 0.04 s tick), and progress through the beat
   and the scene index come from the frame number, not the wall clock.
-- **Scenes are data:** a `Scene(name, discs, motion, base_deg)`, where
-  `discs` is a tuple of `(x, y, height_px)` placements (layout helpers
-  such as `grid(cols, rows, height_px)` generate them). All discs in a
-  scene share one motion. Adding or tuning a scene never touches the
-  render loop.
+- **Scenes are data:** a `Scene(name, discs, motion, base_deg, text)`,
+  where `discs` is a tuple of `(x, y, height_px)` placements. Layout
+  helpers generate them: `grid`, `row`, `packed_row` (mixed sizes side by
+  side) and `brick` (offset rows). All discs in a scene share one motion.
+  A scene with `text` and no discs is a typography scene. Adding or tuning
+  a scene means editing `SCENES`, never the render loop. The sequence
+  loops.
 - **Motion types, eased with `(1 - cos πp) / 2`:**
   - `reset`: a full 360° per beat, landing on the start orientation.
-  - `rock`: out `ROCK_DEGREES` (60) and back within the beat,
-    pendulum-style.
-- **Phase 1 cost** (worst case: 16 discs in a 2x8 grid, reset motion,
+  - `rock`: out `ROCK_DEGREES` (60) from `base_deg` and back within the
+    beat, pendulum-style. `base_deg = -30` swings -30° to +30°.
+
+  Both end each beat back at `base_deg`, so scene cuts land with the
+  discs at rest.
+- **Small discs are 12 px** (`SMALL_DISC_PX`). 24 px also looked good, but
+  12 px was chosen for headroom; scenes can still use larger discs where
+  the layout needs them.
+- **Current sequence and cost** (Pi 3B+, all 25.0 fps, consistent over
+  two loops):
+
+  | # | Scene | Discs | Motion | ms/frame | CPU |
+  |---|---|---|---|---|---|
+  | 1 | Four in a row | 4 × 40 px | reset | 23 | 47% |
+  | 2 | One, centred | 1 × 48 px | rock ±30° | 7–10 | 16–23% |
+  | 3 | 2x8 grid | 16 × 12 px | reset | 22 | 48% |
+  | 4 | Row of eight | 8 × 24 px | rock ±30° | 19 | 41% |
+  | 5 | Pyramid | 12→44→12 px | reset | 26 | 53% |
+  | 6 | Two, backs | 2 × 50 px | rock around 180° | 14 | 30% |
+  | 7 | Brick | 8 + 7 × 12 px | reset | 21 | 46% |
+  | 8 | 3x8 grid | 24 × 12 px | rock ±30° | 30 | 65% |
+  | 9 | INSERT DISK | text (Spleen 8x16) | none | 2 | 5% |
+
+  Spikes up to about 55 ms happen mostly on scene cuts, where the whole
+  screen changes at once, and the deadline loop catches up. Scenes have
+  been checked offline to stay inside the panel with no discs
+  overlapping through the whole beat.
+- **Flags:**
+  - `--scene N` loops one scene, for tuning.
+  - `--stills DIR` writes PNGs at quarter-beat steps without the panel.
+  - `--outline-only` draws outlines only.
+  - `--tick` sets the frame length.
+- **Phase 1 benchmark** (worst case: 16 discs in a 2x8 grid, reset motion,
   Pi 3B+). Every configuration held 25 fps:
 
   | Disc size | Detail | luma diff segments | ms/frame | CPU |
