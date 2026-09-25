@@ -174,153 +174,122 @@ parser.
   and share it; `disk_rhythm.py` uses this for every disc. The
   perspective is defined relative to the disc, so it looks the same at any
   size.
-- **Flat drawing:** `draw_flat_disc(draw, model, angle, screen_xy,
-  height_px)` draws only the front face (the `outline_front` edge group
-  plus front details) as a flat 2D shape, rotated in the screen plane.
-  Positive angles turn clockwise on screen; there's no depth, perspective
-  or face gating. The "vinyl" scenes use it.
-
 ## Disc rhythm screensaver (`experiments/disk_rhythm.py`)
 
-For the INSERT DISK moment: many discs animating on a steady beat, with
-the scene changing every few beats.
+The INSERT DISK screensaver: wireframe floppy discs animating in unison on
+a steady beat, with the scene changing every 4 beats. **The scene set is
+locked.** `./rig run disk_rhythm.py` with no flags plays exactly this
+loop, in this order, forever:
+
+| # | Scene | Discs | Motion | ms/frame | CPU |
+|---|---|---|---|---|---|
+| 1 | `row-turn` | 4 × 40 px | full turn | 23 | 47% |
+| 2 | `conveyor-v` | 6 columns × 2 × 24 px, alternating up/down | vertical conveyor | 38.5 | 80% |
+| 3 | `tumble-rows` | 2 rows × 6 × 24 px, opposite ways | flip (x axis) | 27 | 58% |
+| 4 | `mirror` | 6 × 32 px, halves mirrored | full turn | 22 | 46% |
+| 5 | `roll` | 6 × 32 px | conveyor + half-turn spin | 24 | 50% |
+| 6 | `tumble` | 4 × 40 px | flip (x axis) | 18 | 38% |
+| 7 | `gears` | 2x6 × 20 px, checkerboard | counter-rotating full turns | 28 | 58% |
+| 8 | `pyramid` | 12→44→12 px | full turn | 26 | 53% |
+
+Costs are from the Pi 3B+ at 25 fps, measured after the final cleanup and
+unchanged from before it. `SCENES` holds the scenes in this play order
+and is also the default loop. `--sequence` plays another order or subset
+of these for testing. `pyramid` (12/22 px discs) and `gears` (20 px)
+predate the 24 px floor and were kept deliberately.
 
 - **Timing:** `BEAT_SECONDS` (1; `--beat-seconds` scales the whole
   rhythm) and `SCENE_BEATS` (4). Frames are counted (25 per beat at the
   0.04 s tick), and progress through the beat and the scene come from the
   frame number, not the wall clock.
-- **Scenes are data, addressed by name:** a `Scene(name, about, discs,
-  motion, base_deg, axis, slide, rpb, text)` in `SCENES`, where `discs`
-  is a tuple of `(x, y, height_px[, sign])` placements.
-  - Layout helpers generate the placements: `grid`, `row`, `packed_row`
-    (mixed sizes), `brick` (offset rows), and `signed` (attaches a
-    per-disc direction).
-  - A scene with `text` and no discs is a typography scene.
-  - `DEFAULT_SEQUENCE` is the default play order.
-  - Adding or tuning a scene means editing `SCENES`, never the render loop.
-- **Motions.** `motion` is one name or a tuple of names to combine. 3D
-  motions use `draw_disc`:
+- **Scenes are data:** a `Scene(name, about, discs, motion, axis, slide)`,
+  where `discs` is a tuple of `(x, y, height_px[, sign])` placements.
+  Layout helpers generate them: `grid`, `row`, `packed_row` (mixed sizes),
+  and `signed` (per-disc direction). Tuning a scene means editing
+  `SCENES`, never the render loop.
+- **Motions.** `motion` is one name or a tuple of names to combine; all
+  are drawn through `draw_disc` (3D, face-gated, perspective):
   - `reset`: a full 360° per beat, landing on the start orientation.
-  - `spin`: a half turn per beat that keeps going in one direction, so
-    the faces alternate each beat.
+  - `spin`: a half turn per beat that keeps going; faces alternate each
+    beat.
   - `conveyor`: slides by `slide = (dx, dy)` per beat, wrapping round the
     panel edges.
+- **Modifiers:**
+  - `axis="x"` flips discs top-over-bottom instead of turning them. The
+    back comes up upside down, as a real disc would.
+  - A disc's sign of -1 mirrors its rotation and slide direction.
+- **Seamless by construction:** progress is eased with `(1 - cos πq)`/2.
+  Every motion ends each beat at a fixed pose, and every scene ends exactly
+  where it started (checked offline, every frame of four beats: no
+  overlaps, and nothing clipped except the conveyors' deliberate wrap).
+- **Design rules** (from panel review, 2026-09-25): discs at least 24 px
+  (`MIN_DISC_PX`); no scene built around a lone disc; mesmerizing and
+  rhythmical rather than rigid, hurried or cute; unison by default.
 
-  Flat "vinyl" motions use `draw_flat_disc`, with speed set by `rpb`
-  (rotations per beat):
-  - `flat-spin`: `rpb` turns per beat in the screen plane, eased per beat.
-  - `turntable`: `rpb` turns per beat at constant speed.
+### Tried and dropped (don't re-explore from scratch)
 
-  Flat speed is always in rotations per beat, never a separate time-based
-  speed, so `--beat-seconds` scales every scene together.
-- **Per-scene modifiers:**
-  - `axis="x"` flips 3D discs top-over-bottom instead of turning them. The
-    back then comes up upside down, as a real disc would.
-  - A disc's sign of -1 mirrors its rotation and slide direction. For flat
-    spins that's counter-clockwise (`CCW = -1`).
+- **Flat "vinyl" spins** (2D rotation in the screen plane, front face
+  only, like a record on a turntable). Eight scenes were built and
+  reviewed on the panel; it didn't work out and the code path was
+  removed. Facts to know if it comes back:
+  - Speed was set in rotations per beat, so it stayed beat-locked.
+  - A square disc spinning flat needs its diagonal (1.39 × height) of
+    room, which caps it at 44 px.
+  - Whole turns per scene are needed to loop seamlessly, and the angle
+    has to be reduced mod 360 (float noise at 360° shifted pixels).
+- **INSERT DISK text scene.** The words scrambled in over beat 1, held,
+  and scrambled out over beat 4, reusing `scramble_test`'s reveal. Dropped
+  along with the scene engine's support for text scenes; the loop is
+  discs only.
+- **Other 3D scenes and motions cut over three review rounds:**
+  - 12 px discs and dense grids (too small to read); this is where the
+    24 px floor came from.
+  - Single-disc scenes (too cute, too close to the standalone disc).
+  - Rocking, hopping, pulsing, flip-flop, staccato move-then-hold, and the
+    staggered wave (`spread`); these read as rigid, hurried or off-mood.
+  - Continuous half-turn spins (`spin-cw`, `spin-ccw`, `spin-oscillate`),
+    `crescendo`, `stairs`, `tumble-staggered`, and the horizontal and
+    diagonal conveyors.
 
-  Progress is eased with `(1 - cos πq)`/2. Every motion ends each beat at a
-  fixed pose, and every scene ends exactly where it started, so loops and
-  cuts are seamless.
-- **Flat spins must make whole turns per scene.** The disc isn't
-  symmetric, so `rpb × SCENE_BEATS` has to be a whole number (e.g. 0.25,
-  0.5, 0.75, 1, 2); `check_scenes()` enforces this at startup. Flat angles
-  are also reduced mod 360: without that, whole turns landed on 360° or
-  1080° instead of 0°, and float noise in `sin(2π)` shifted a few pixels,
-  so the loop wasn't seamless.
-- **Flat discs are at most 44 px.** A square disc spinning flat sweeps a
-  circle 1.39 × its height (the diagonal), so 44 px is the largest that
-  stays fully visible on 64 px. Neighbours need their centres at least that
-  diagonal apart, or corners collide at 45°. Two rows of 24 px flat discs
-  (`vinyl-brick`) is the most that fits vertically: corners reach the top
-  and bottom pixel rows without clipping.
-- **Design rules from panel review (2026-09-25):**
-  - **Discs are at least 24 px** (`MIN_DISC_PX`); 12 px didn't read well.
-  - **No 3D scene built around a lone, single disc.** It felt too cute and
-    too close to the standalone `wireframe_disc.py` animation. The flat
-    `vinyl-solo` is an explicitly requested exception.
-  - **The mood is mesmerizing and rhythmical, not rigid or hurried.**
-    Rocking, hopping, pulsing and staccato move-then-hold were all cut on
-    that basis, and removed from the engine.
-  - **Unison by default.**
-  - Two kept scenes predate the 24 px floor: `pyramid` (12/22 px discs)
-    and `gears` (20 px). `--list-scenes` marks them.
-  - **Cut after review:**
-    - 2026-09-25, first round: `spin-cw`, `spin-ccw`, `spin-oscillate`,
-      `conveyor`, `conveyor-diagonal`, `crescendo`, `tumble-staggered`,
-      `stairs`.
-    - The `oscillate` motion and the `spread` stagger went with them.
-- **INSERT DISK text:**
-  - `insert-disk` scrambles in over beat 1, holds through beats 2–3, and
-    scrambles out over beat 4, ending blank as the scene cuts.
-  - It reuses `scramble_test`'s `schedule`/`frame_chars`; the exit is the
-    reveal played in reverse.
-  - Noise changes every frame (0.04 s), which is scramble_test's validated
-    cadence, so no separate tick is needed at the default beat. The
-    reveal takes one beat (1.0 s), shorter than scramble_test's validated
-    1.6 s standalone reveal.
-  - `--beat-seconds` stretches the reveal with the beat but keeps the
-    0.04 s noise cadence.
-  - The randomness is seeded per scene occurrence and frame, so stills,
-    GIFs and the panel match.
-- **Scenes and cost** (default order; Pi 3B+, all 25.0 fps, consistent
-  over two loops):
+### Notes on cost
 
-  | Scene | Discs | Motion | ms/frame | CPU |
-  |---|---|---|---|---|
-  | `row-turn` | 4 × 40 px | reset | 23 | 48% |
-  | `vinyl-row` | 4 × 40 px | flat-spin, 1 turn/beat | 28 | 56% |
-  | `tumble` | 4 × 40 px | reset, x axis | 18.5 | 39% |
-  | `vinyl-decks` | 2 × 44 px, mirrored | turntable, 0.75 turn/beat | 16.5 | 33% |
-  | `mirror` | 6 × 32 px, halves mirrored | reset | 22.5 | 47% |
-  | `vinyl-brick` | 7 + 6 × 24 px, offset rows | turntable, 0.5 turn/beat | 36.5 | 74% |
-  | `conveyor-v` | 6 columns × 2 × 24 px, alternating up/down | conveyor ↕ | 38.5 | 80% |
-  | `vinyl-alternate` | 4 × 40 px, alternating directions | flat-spin, 0.5 turn/beat | 27 | 54% |
-  | `pyramid` | 12→44→12 px | reset | 26 | 53% |
-  | `vinyl-quarter-turns` | 3 × 44 px | flat-spin, 0.25 turn/beat | 27 | 54% |
-  | `roll` | 6 × 32 px | conveyor + spin | 24.4 | 51% |
-  | `vinyl-pyramid` | 28→44→28 px | flat-spin, 1 turn/beat | 31.5 | 62% |
-  | `gears` | 2x6 × 20 px, checkerboard | reset | 28 | 59% |
-  | `vinyl-fast` | 6 × 28 px, counter-clockwise | flat-spin, 2 turns/beat | 24 | 48% |
-  | `tumble-rows` | 2 rows × 6 × 24 px, opposite ways | reset, x axis | 27.5 | 58% |
-  | `vinyl-solo` | 1 × 44 px | turntable, 0.25 turn/beat | 11 | 24% |
-  | `insert-disk` | text (Spleen 8x16) | scramble in / hold / out | 3.5 | 8% |
-
-- **Notes on cost:**
-  - **Full-panel motion at 24 px is the budget ceiling.** Every disc
-    moving across the whole panel changes the whole panel every frame.
-    - `conveyor-v` at 7 columns ran at 43 ms/frame (23 fps); at 6 columns
-      it holds 25 fps at about 38 ms. The same was seen for the since-cut
-      `conveyor-diagonal`.
-    - `vinyl-brick` (13 constant-speed flat discs) sits at about 37 ms.
-    - Fewer discs only helps a little, because the changed area still
-      spans the panel.
-  - **An over-budget scene also disturbs the next one.** Its four beats
-    stretch (motion is frame-counted), then the deadline loop sprints to
-    catch up, so the following scene briefly runs fast (27 fps was seen).
-    Keep every scene inside 40 ms.
-  - Spikes up to about 55–70 ms happen mostly on scene cuts and in the
-    conveyors; short spikes are absorbed.
-  - **Holding still is nearly free.** A frame identical to the one before
-    sends almost nothing. The since-cut staggered `tumble-staggered` cost
-    15 ms against 18.5 for `tumble`.
-  - **`roll`'s half-turn spin passes edge-on at mid-beat.** Every disc is a
+- **Full-panel motion at 24 px is the budget ceiling.**
+  - Every disc moving across the whole panel changes the whole panel
+    every frame.
+  - `conveyor-v` at 7 columns ran at 43 ms/frame (23 fps); at 6 it holds
+    25 fps at about 38 ms, but with no headroom. An occasional loop dips
+    to 24.8 fps and the next scene catches up.
+  - Fewer discs only helps a little, because the changed area still spans
+    the panel.
+- **An over-budget scene disturbs the next one.** Its beats stretch
+  (motion is frame-counted), then the deadline loop sprints to catch up,
+  so the following scene briefly runs fast. Keep every scene inside
+  40 ms.
+- **Spikes and slivers:**
+  - Spikes up to about 45–60 ms happen mostly on scene cuts and in
+    `conveyor-v`; short spikes are absorbed.
+  - `roll`'s half-turn spin passes edge-on at mid-beat, so every disc is a
     thin sliver at the fastest point of the turn.
-  - Every scene has been checked offline (every frame of four beats): no
-    discs overlap, nothing is clipped except conveyors (which wrap by
-    design), and each scene ends exactly where it started.
-- **Flags:**
-  - `--list-scenes` shows names, sizes, motions and floor violations.
-  - `--sequence "a,b,c"` loops those scenes in order; unknown names are
-    rejected with the list of valid ones.
-  - `--beat-seconds` sets the shared pace.
-  - `--stills DIR` writes PNGs at quarter-beat steps.
-  - `--gif PATH` renders one loop as an animated GIF at the live frame
-    rate, 2x scale, for reviewing motion away from the panel.
-  - `--outline-only` draws outlines only (3D discs).
-  - `--tick` sets the frame length.
-- **Phase 1 benchmark** (worst case: 16 discs in a 2x8 grid, reset motion,
-  Pi 3B+). Every configuration held 25 fps:
+- **Holding still is nearly free.** A frame identical to the one before
+  sends almost nothing (a staggered tumble cost 15 ms against 18.5 for
+  unison).
+
+### Flags
+
+- `--list-scenes`: names, sizes, motions and floor violations.
+- `--sequence "a,b,c"`: loop those scenes in order; unknown names are
+  rejected with the valid list.
+- `--beat-seconds`: the shared pace.
+- `--stills DIR`: PNGs at quarter-beat steps.
+- `--gif PATH`: one loop as an animated GIF at the live frame rate, 2x
+  scale.
+- `--outline-only`: outlines only.
+- `--tick`: frame length.
+
+### Phase 1 benchmark (how the engine was sized)
+
+- Worst case: 16 discs in a 2x8 grid, reset motion, Pi 3B+. Every
+  configuration held 25 fps:
 
   | Disc size | Detail | luma diff segments | ms/frame | CPU |
   |---|---|---|---|---|

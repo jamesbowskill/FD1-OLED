@@ -101,10 +101,9 @@ def load_svg(name):
 def build_model():
     """Return (points3d, edge groups, centre, face height) in SVG units.
 
-    Edge groups: "always" (outline + extrusion), "front", "back", and
-    "outline_front" (just the z=0 outline, for flat drawing)."""
+    Edge groups: "always" (outline + extrusion), "front", "back"."""
     pts = []
-    groups = {"always": [], "front": [], "back": [], "outline_front": []}
+    groups = {"always": [], "front": [], "back": []}
 
     outline, width, height = load_svg("outline.svg")
     ox = [x for p, _ in outline for x, _ in p]
@@ -129,9 +128,7 @@ def build_model():
         return start
 
     for path_pts, closed in outline:
-        n_before = len(groups["always"])
         front_start = add("always", path_pts, closed, 0.0)
-        groups["outline_front"] += groups["always"][n_before:]
         back_start = add("always", path_pts, closed, DISC_DEPTH)
         groups["always"].extend((front_start + k, back_start + k) for k in range(len(path_pts)))
     for path_pts, closed in load_svg("front.svg")[0]:
@@ -178,20 +175,6 @@ def draw_disc(draw, model, angle, screen_xy, height_px, outline_only=False, axis
     proj = project(pts, centre, face_height, angle, screen_xy, height_px, axis)
     edges = groups["always"] if outline_only else visible_edges(groups, angle)
     for a, b in edges:
-        draw.line((proj[a], proj[b]), fill="white", width=LINE_WIDTH)
-
-
-def draw_flat_disc(draw, model, angle, screen_xy, height_px):
-    """Draw the front face only (outline + front details) as a flat 2D shape,
-    rotated in the screen plane around the disc centre: positive angles turn
-    clockwise on screen. No depth, perspective or face gating."""
-    pts, groups, (cx, cy, _), face_height = model
-    sx, sy = screen_xy
-    scale = height_px / face_height
-    c, s = math.cos(angle), math.sin(angle)
-    proj = [(sx + ((x - cx) * c - (y - cy) * s) * scale,
-             sy + ((x - cx) * s + (y - cy) * c) * scale) for x, y, _ in pts]
-    for a, b in groups["outline_front"] + groups["front"]:
         draw.line((proj[a], proj[b]), fill="white", width=LINE_WIDTH)
 
 
