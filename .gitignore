@@ -5,3 +5,4 @@ __pycache__/
 run/
 logs/
 .DS_Store
+*.gif
