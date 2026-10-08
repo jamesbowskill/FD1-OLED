@@ -270,6 +270,8 @@ def main():
     from oled_common import get_device
 
     device = get_device()
+    for role in (TITLE, SUB, TIMER):
+        role.font  # load now: Unifont takes ~0.6 s, which would stall the first frame
     rng = random.Random(args.seed)
     reveal_frames = max(1, round(args.reveal / args.tick))
     scroll_every = max(1, round(SCROLL_TICK / args.tick))
