@@ -117,12 +117,12 @@ def main():
         bands[band] = bands.get(band, 0) + 1
     print(f"mockup: {len(bad)} of {SIZE[0] * SIZE[1]} pixels differ from {args.mockup.name}"
           f"{' ' + str(bands) if bands else ''} (rows 1-2 should differ only by Figma's Row 2"
-          f" anti-aliasing; Row 3 is the live Spleen 5x8 design, so it differs by design)")
+          f" anti-aliasing and the dim |; Row 3 is the live Spleen 5x8 design, so it differs by design)")
     marked = Image.blend(mock, ours, 0.5)
     for x, y in bad:
         marked.putpixel((x, y), (255, 0, 0))
     sheet([(mock, "Figma mockup (incoming/OLED.png)"), (ours, "panel render (PlayerScreen)"),
-           (marked, f"differences in red: {bands} (Row 3 differs by design)")]).save(
+           (marked, f"differences in red: {bands} (the | and Row 3 differ by design)")]).save(
         args.out / "mockup_diff.png")
 
     # 2. The full player screen: Japanese, Latin, long scrolling Japanese, mixed.

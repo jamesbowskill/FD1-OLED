@@ -24,8 +24,8 @@ rig's wiring, which has also been physically verified).
   - **Roles** (font swap, 2026-10-08):
     - `TITLE`: Unifont JP 18.0.01, the 16 px title row.
     - `SUB`: merged M+ 12 Regular, for artist/album, busy-screen status
-      and noise, and FD1's `no_drive`/`mount_error` status line (which
-      this rig doesn't have yet; it gets built when display.py is ported).
+      and noise, and the single-line status screen for FD1's
+      `no_drive`/`mount_error` states (`experiments/status_screen.py`).
     - `TIMER`: Spleen 5x8, for all of Row 3 (times, bar and counter),
       unchanged from the live design.
   - **Metrics:** each role reads `size`, `ascent`, `descent` and
@@ -423,7 +423,7 @@ limit: a text-sized region redraws in about 5–6 ms.
 
 Rows 1–2 match James's Figma mockup of 2026-10-08 (`incoming/OLED.png`)
 pixel for pixel: `experiments/font_stills.py` reproduces it, and every
-Row 1–2 pixel matches except Row 2's anti-aliasing. The mockup's Row 2
+Row 1–2 pixel matches except Row 2's anti-aliasing and its `|`. The mockup's Row 2
 layer sits at y = 26.375, so Figma blends it into 281 pixels of grey 159
 and 281 of 96. The panel draws it crisp at y=26, its nearest whole pixel.
 
@@ -433,12 +433,23 @@ not a design change. Spleen 5x8 is the device font for Row 3, laid out
 exactly as on the live player screen before the font swap (checked frame
 for frame against `cb5f5aa`). `font_stills.py` only compares rows 1–2.
 
+**The `|` in Row 2 is dim (34, level 2), not white.** The mockup's white
+`|` was a Figma omission (the grey wasn't applied), not a design change;
+the dim `|` is the earlier, validated decision. It is redrawn in dim in
+every phase (settled, mid-scramble and while Row 2 scrolls), so it never
+flashes white; noise in its cell is dim too. Its position still comes
+from `getlength` (`role.layout`), and artist and album stay white.
+
+Only the `|` and Row 3 had taken their greys from the mockup; everything
+else in the swap uses the validated tiers (white 255, mid 136, total 68,
+dim 34).
+
 - **Rows 1–2 (cell top-left, from the mockup):**
 
   | Element | Font role | Position | Grey |
   |---|---|---|---|
   | Row 1 title | `TITLE` (Unifont) | (8, 6), clip at x 248 | 255 |
-  | Row 2 `artist \| album` | `SUB` (M+), 13 px strip | (9, 26), clip at x 248 | 255, including the `\|` |
+  | Row 2 `artist \| album` | `SUB` (M+), 13 px strip | (9, 26), clip at x 248 | 255; the `\|` is dim, 34 (level 2) |
 
 - **Row 3:** `TIMER` (Spleen 5x8), cell y 47, on a 48-column grid from
   x 9 (5 px columns):
@@ -451,7 +462,7 @@ for frame against `cb5f5aa`). `font_stills.py` only compares rows 1–2.
   | Counter, right-aligned in a "999/999" field | 41–47 | mid, 136 |
 
 - **Flags:** `--mid-grey`, `--played-grey`, `--total-grey` and
-  `--pipe-grey` (default 255, the mockup's white `|`); `--wide-noise
+  `--pipe-grey` (default 34, dim); `--wide-noise
   pair|fullwidth` sets the scramble noise in double-width cells. To try
   the mockup's Row 3 greys on the live layout:
   `--mid-grey 128 --played-grey 114 --total-grey 38`. 128 is the same
@@ -479,6 +490,20 @@ for frame against `cb5f5aa`). `font_stills.py` only compares rows 1–2.
 - **History:** after watching the panel on 2026-09-24, counter and total
   stopped scrambling on track change, which leaves the title (and
   `artist | album` when it changes) as the only thing that moves.
+
+## Status screen (`experiments/status_screen.py`) and busy screen
+
+- **Status screen:** FD1's non-playing states (`no_drive`, `mount_error`,
+  and the others in display.py's `STATE_MESSAGES`, copied verbatim) as
+  one white line in `SUB` (M+ 12). FD1 draws it at (4, 12) in Pillow's
+  default font. This prototype puts it in Row 2's text area, (9, 26)
+  clipped at x 248, which is also roughly centred vertically. That
+  position is a first guess, not a reviewed design; `--x`/`--y` move it.
+  It scramble-reveals once, then holds (it would scroll if it
+  overflowed; the longest message, `finished`, is 222 of 240 px).
+  `./rig run status_screen.py mount_error`, or `--message TEXT`.
+- **Busy screen:** `./rig run scramble_bg_test.py --message "Reading
+  disk..."` holds one status instead of cycling `MESSAGES`.
 
 ## Grey levels and fullscreen animation cost
 

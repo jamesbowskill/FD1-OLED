@@ -3,7 +3,7 @@
 triggers, driven by a mock playlist (no mpv/jukebox).
 
   Row 1  title            TITLE role (Unifont JP), scrolls if it overflows
-  Row 2  artist | album   SUB role (M+ 12), scrolls if it overflows
+  Row 2  artist | album   SUB role (M+ 12), scrolls if it overflows; the | is dim
   Row 3  elapsed, progress bar, total, counter in TIMER (Spleen 5x8)
 
 Rows 1-2 match James's Figma mockup of 2026-10-08 (incoming/OLED.png) pixel
@@ -58,9 +58,9 @@ TOTAL_COL = 33
 COUNTER_COL, COUNTER_WIDTH = 41, 7  # right-aligned in a "999/999" field
 
 WHITE = (255, 255, 255)
-# Unplayed bar: panel level 2, validated on the panel. The | is white like
-# the rest of Row 2, as in the mockup.
-UNPLAYED = (34, 34, 34)
+# Dim: panel level 2, validated on the panel. Used for the unplayed bar and
+# Row 2's |. (The mockup's white | was a Figma omission, not a design change.)
+DIM = (34, 34, 34)
 
 PLAYLIST = [
     ("ネオ東京上空の風", "芸能山城組", "Symphonic Suite AKIRA", 228),
@@ -163,7 +163,7 @@ def mmss(seconds):
 
 class PlayerScreen:
     def __init__(self, mode, size, reveal_frames, rng, mid_grey=136, played_grey=136,
-                 total_grey=68, pipe_grey=255, wide_noise="pair"):
+                 total_grey=68, pipe_grey=DIM[0], wide_noise="pair"):
         self.mid = (mid_grey,) * 3
         self.played = (played_grey,) * 3
         self.total = (total_grey,) * 3
@@ -214,6 +214,8 @@ class PlayerScreen:
             sdraw.text((state.x, 0), state.text, font=state.role.font, fill=WHITE)
         else:
             draw_items(sdraw, (state.x, 0), state.role, state.offsets, items, WHITE)
+        # Redraw the | cell (positioned by getlength, via layout) in its own
+        # grey, in every phase: settled, scramble reveal and scrolling.
         if pipe and pipe != WHITE and " | " in state.text:
             i = state.text.index(" | ") + 1
             px = state.x + state.offsets[i]
@@ -240,7 +242,7 @@ class PlayerScreen:
         bar = self.row3["bar"]
         bar_xy = (ROW3_X + BAR_COL * col, ROW3_Y)
         items = bar.visible_items() or list(bar.text)
-        draw_items(self.draw, bar_xy, TIMER, bar.offsets, items, UNPLAYED)
+        draw_items(self.draw, bar_xy, TIMER, bar.offsets, items, DIM)
         if self.bar_done:
             draw_items(self.draw, bar_xy, TIMER, bar.offsets[:self.bar_done],
                        items[:self.bar_done], self.played)
@@ -261,7 +263,7 @@ def main():
     grey_arg(parser, "--mid-grey", 136, "elapsed and counter (136 = level 8; mockup 128)")
     grey_arg(parser, "--played-grey", 136, "played part of the bar (136 = level 8; mockup 114)")
     grey_arg(parser, "--total-grey", 68, "total duration (68 = level 4; mockup 38)")
-    grey_arg(parser, "--pipe-grey", 255, "the | in Row 2 (255 = white, as in the mockup)")
+    grey_arg(parser, "--pipe-grey", 255, "the | in Row 2 (34 = level 2, dim)")
     parser.add_argument("--wide-noise", choices=WIDE_NOISE_MODES, default="pair",
                         help="scramble noise in double-width cells")
     args = parser.parse_args()

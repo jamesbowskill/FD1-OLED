@@ -11,7 +11,8 @@ scramble primitive only when its text actually changes; the background never
 restarts. Per frame, in order: noise rows (dim grey), a black mask over the
 message's box, then the message in white.
 
-Cycles READING DISK -> WRITING -> VERIFYING until stopped (`./rig stop`).
+Cycles READING DISK -> WRITING -> VERIFYING until stopped (`./rig stop`),
+or holds one status with --message (e.g. "Reading disk...").
 """
 
 import argparse
@@ -70,6 +71,7 @@ def main():
                         help="fraction of background cells that change per refresh (0-1)")
     parser.add_argument("--dwell", type=float, default=4.0, help="seconds per status message")
     parser.add_argument("--reveal", type=float, default=1.6, help="seconds for a message reveal")
+    parser.add_argument("--message", help="hold this status message instead of cycling")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
     args = parser.parse_args()
@@ -106,7 +108,7 @@ def main():
     start_t = stats_t = time.perf_counter()
     while True:
         t0 = time.perf_counter()
-        message = MESSAGES[int((t0 - start_t) // args.dwell) % len(MESSAGES)]
+        message = args.message or MESSAGES[int((t0 - start_t) // args.dwell) % len(MESSAGES)]
         if status.set_text(message):
             print(f"status -> {message}")
 
