@@ -18,6 +18,14 @@ rig's wiring, which has also been physically verified).
   `persist=True`; extra kwargs such as `framebuffer=` pass through) and
   calls `check_gpio_free()` first, which raises with the holding PID if
   `/dev/gpiochip0` is already in use.
+- `oled_fonts.py` — the only place fonts are loaded. Defines three roles,
+  `TITLE` (16 px row), `SUB` (12 px rows: artist/album, busy-screen
+  status, status line) and `MONO8` (Row 3 timer/counter), each reading
+  `size`, `ascent`, `descent` and `cell_height` from its BDF header, with
+  the font and Latin `advance` loaded once, on first use. Layouts use
+  `cell_height` for strip heights and row pitch, never a hard-coded size.
+  Changing a font means changing its path here. Currently all three point
+  at Spleen; `python3 oled_fonts.py` prints the table.
 - `experiments/` — scratch space for one-off tests. Things that prove out
   graduate to top-level scripts; things that don't can stay here or be
   deleted later. Scripts here add the repo root to `sys.path` to import
@@ -34,6 +42,38 @@ rig's wiring, which has also been physically verified).
   and is wrong). Rendering is pure black/white with no anti-aliasing,
   fixed advance (6 px / 8 px), and cells of 12 px (9 ascent + 3 descent)
   or 16 px (12 + 4).
+- `fonts/unifont/` and `fonts/mplus/` — the planned replacements (title →
+  Unifont JP, 12 px rows → M+ 12; Row 3 stays Spleen 5x8). Committed but
+  **not yet wired into `oled_fonts.py`** (font swap phase 1, 2026-10-08).
+  Measured on this Pi 3B+:
+  - **Unifont JP** (`unifont_jp-18.0.01.bdf`) is one Unicode BDF:
+    - 57,086 glyphs. Latin and half-width kana are 8 px wide; kana, kanji
+      and full-width forms are 16 px.
+    - The cell is 16 px (14 ascent + 2 descent), and glyphs ink all 16
+      rows. Spleen 8x16 always left the top and bottom rows blank.
+    - It loads in about 0.6 s, warm or cold, and adds about 17 MB. That's
+      FreeType parsing every glyph, not disk reads.
+    - A subset keeping all CJK plus Latin, punctuation, kana and
+      full-width forms (23k glyphs) loads in about 0.25 s and +7 MB.
+      Limiting the kanji to the JIS set M+ covers (8.5k glyphs) gets
+      about 0.09 s and +3 MB.
+  - **M+ is a source set, not one font.** `fonts/mplus/` is PixelMplus's
+    build tree. PixelMplus12-Regular is four BDFs merged in order:
+    `f12r` (Latin-1), `f12r-jisx0201` (half-width kana), `j12r`
+    (JIS X 0208) and `j12r-jisx0213`.
+    - The Japanese files are JIS-encoded, so Pillow can't look up
+      Unicode text in them directly. The `jisx0201` file is also
+      mislabelled `iso8859`.
+    - A usable font needs a merge to one Unicode BDF via
+      `ucstable.d/*.TXT`, first file to claim a code point winning (as
+      `scripts/bdf2eps.pl` does). That merge gives 7,251 glyphs, with
+      Latin and half-width kana 6 px wide and kana and kanji 12 px.
+    - **The cell is 13 px** (11 ascent + 2 descent), not 12. Uppercase
+      and the Latin noise pool never ink the top row, and only `Q` reaches
+      the 13th, so rows of those can still stack at a 12 px pitch.
+    - **Missing:** `ō ū Ō` (macrons), `–` and `—`, `〜` (U+301C), `•`,
+      `€`, `髙`, `﨑` and Hangul. Missing characters render as a visible
+      placeholder glyph, not a blank.
 - `venv/` — Python venv with `luma.core`, `luma.oled`, `Pillow`, `watchdog`,
   etc. Always run scripts with `venv/bin/python3`, not system Python.
 - `rig` — picks which utility owns the OLED, one at a time. Nothing starts

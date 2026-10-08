@@ -2,9 +2,10 @@
 """Player screen prototype: all three rows, real fonts, scroll and scramble
 triggers, driven by a mock playlist (no mpv/jukebox).
 
-  Row 1  title            Spleen 8x16, full width, scrolls if it overflows
-  Row 2  artist | album   Spleen 6x12, full width, scrolls if it overflows
-  Row 3  elapsed, progress bar, total, track counter   Spleen 5x8
+  Row 1  title            TITLE font role, full width, scrolls if it overflows
+  Row 2  artist | album   SUB font role, full width, scrolls if it overflows
+  Row 3  elapsed, progress bar, total, track counter   MONO8 font role
+(roles from oled_fonts; currently Spleen 8x16, 6x12 and 5x8.)
 
 Scramble rules:
   - Every element scrambles in once, on the initial paint.
@@ -31,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PIL import Image, ImageDraw
 
 from oled_common import get_device
-from scramble_test import SCRAMBLE_TICK, frame_chars, load_font, schedule
+from oled_fonts import MONO8, SUB, TITLE
+from scramble_test import SCRAMBLE_TICK, frame_chars, schedule
 
 # display.py's scroll cadence and speed. Scrolling keeps this pace even
 # though the loop ticks at SCRAMBLE_TICK (see CLAUDE.md on the two paces).
@@ -164,39 +166,38 @@ def main():
           f"total {args.total_grey} (level {args.total_grey // 16}), dim {DIM[0]} (level {DIM[0] // 16})")
 
     rng = random.Random(args.seed)
-    fonts = {px: load_font(px) for px in (16, 12, 8)}
-    adv8 = int(fonts[8].getlength("0"))
+    adv8 = MONO8.advance
     reveal_frames = max(1, round(args.reveal / args.tick))
     scroll_every = max(1, round(SCROLL_TICK / args.tick))
 
-    title = ScrollState(fonts[16], TEXT_WIDTH, reveal_frames, rng)
-    artist_album = ScrollState(fonts[12], TEXT_WIDTH, reveal_frames, rng)
-    row3 = {name: ScrollState(fonts[8], TEXT_WIDTH, reveal_frames, rng)
+    title = ScrollState(TITLE.font, TEXT_WIDTH, reveal_frames, rng)
+    artist_album = ScrollState(SUB.font, TEXT_WIDTH, reveal_frames, rng)
+    row3 = {name: ScrollState(MONO8.font, TEXT_WIDTH, reveal_frames, rng)
             for name in ("elapsed", "bar", "total", "counter")}
 
     device = get_device()
     canvas = Image.new(device.mode, device.size, "black")
     draw = ImageDraw.Draw(canvas)
-    strips = {16: Image.new(device.mode, (TEXT_WIDTH, 16)), 12: Image.new(device.mode, (TEXT_WIDTH, 12))}
+    strips = {role.name: Image.new(device.mode, (TEXT_WIDTH, role.cell_height)) for role in (TITLE, SUB)}
     if args.save_frames:
         args.save_frames.mkdir(parents=True, exist_ok=True)
 
-    def draw_scrolling(state, px, y, pipe_grey=None):
-        strip = strips[px]
+    def draw_scrolling(state, role, y, pipe_grey=None):
+        strip = strips[role.name]
         sdraw = ImageDraw.Draw(strip)
         sdraw.rectangle((0, 0, strip.width - 1, strip.height - 1), fill="black")
         text = state.visible_text()
-        sdraw.text((state.x, 0), text, font=fonts[px], fill=WHITE)
+        sdraw.text((state.x, 0), text, font=role.font, fill=WHITE)
         if pipe_grey and " | " in state.text:
             i = state.text.index(" | ") + 1
-            adv = int(fonts[px].getlength("M"))
+            adv = role.advance
             cx = state.x + i * adv
-            sdraw.rectangle((cx, 0, cx + adv - 1, px - 1), fill="black")
-            sdraw.text((cx, 0), text[i], font=fonts[px], fill=pipe_grey)
+            sdraw.rectangle((cx, 0, cx + adv - 1, role.cell_height - 1), fill="black")
+            sdraw.text((cx, 0), text[i], font=role.font, fill=pipe_grey)
         canvas.paste(strip, (TEXT_X, y))
 
     def draw_row3_text(state, col, fill):
-        draw.text((TEXT_X + col * adv8, ROW3_Y), state.visible_text(), font=fonts[8], fill=fill)
+        draw.text((TEXT_X + col * adv8, ROW3_Y), state.visible_text(), font=MONO8.font, fill=fill)
 
     track = None
     frame = 0
@@ -232,13 +233,13 @@ def main():
         row3["elapsed"].update_text(mmss(elapsed))
 
         draw.rectangle((0, 0, device.width - 1, device.height - 1), fill="black")
-        draw_scrolling(title, 16, ROW1_Y)
-        draw_scrolling(artist_album, 12, ROW2_Y, pipe_grey=DIM)
+        draw_scrolling(title, TITLE, ROW1_Y)
+        draw_scrolling(artist_album, SUB, ROW2_Y, pipe_grey=DIM)
         draw_row3_text(row3["elapsed"], ELAPSED_COL, mid_grey)
         bar = row3["bar"].visible_text()
-        draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar, font=fonts[8], fill=DIM)
+        draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar, font=MONO8.font, fill=DIM)
         if bar_done:
-            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=fonts[8], fill=mid_grey)
+            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=MONO8.font, fill=mid_grey)
         draw_row3_text(row3["total"], TOTAL_COL, total_grey)
         draw_row3_text(row3["counter"], COUNTER_COL, mid_grey)
 

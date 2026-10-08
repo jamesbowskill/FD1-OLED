@@ -2,7 +2,7 @@
 """Fullscreen "busy state" prototype: scrambling noise background with a
 status message overlaid on the centre row.
 
-5 rows of Spleen 6x12 noise run for as long as the script does, updating more
+5 rows of noise in the sub font role run for as long as the script does, updating more
 slowly than the frame rate: every --bg-interval ticks, a random
 --bg-fraction of the cells take a new noise character and the rest hold.
 The centre row's status message reveals via scramble_test.py's
@@ -20,10 +20,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from scramble_test import NOISE, SCRAMBLE_TICK, frame_chars, load_font, schedule
+from scramble_test import NOISE, SCRAMBLE_TICK, frame_chars, schedule
 from oled_common import get_device
+from oled_fonts import SUB
 
-FONT_PX = 12
 ROWS = 5
 STATUS_ROW = 2  # centre of 5
 MESSAGES = ["READING DISK", "WRITING", "VERIFYING"]
@@ -74,14 +74,13 @@ def main():
         parser.error("--bg-fraction must be between 0 and 1")
 
     rng = random.Random(args.seed)
-    font = load_font(FONT_PX)
-    advance = int(font.getlength("M"))
+    font, advance, pitch = SUB.font, SUB.advance, SUB.cell_height
 
     device = get_device()
     cols = device.width // advance
     x0 = (device.width - cols * advance) // 2
-    y0 = (device.height - ROWS * FONT_PX) // 2
-    status_y = y0 + STATUS_ROW * FONT_PX
+    y0 = (device.height - ROWS * pitch) // 2
+    status_y = y0 + STATUS_ROW * pitch
     bg = (args.bg_grey,) * 3
     grid = [[rng.choice(NOISE) for _ in range(cols)] for _ in range(ROWS)]
     cells = [(r, c) for r in range(ROWS) for c in range(cols)]
@@ -113,11 +112,11 @@ def main():
 
         draw.rectangle((0, 0, device.width - 1, device.height - 1), fill="black")
         for row in range(ROWS):
-            draw.text((x0, y0 + row * FONT_PX), "".join(grid[row]), font=font, fill=bg)
+            draw.text((x0, y0 + row * pitch), "".join(grid[row]), font=font, fill=bg)
 
         status_x = x0 + (cols - len(message)) // 2 * advance
         draw.rectangle((status_x, status_y, status_x + len(message) * advance - 1,
-                        status_y + FONT_PX - 1), fill="black")
+                        status_y + SUB.cell_height - 1), fill="black")
         draw.text((status_x, status_y), status.next_chars(), font=font, fill="white")
 
         device.display(canvas)
