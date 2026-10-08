@@ -43,6 +43,9 @@ rig's wiring, which has also been physically verified).
   - **`role.layout(text)`** gives each character's x offset, and
     `role.is_wide(ch)` flags double-width characters, for drawing
     scrambles at final positions.
+- `tests/` — `venv/bin/python3 -m unittest discover tests`. Tests run
+  scripts through their real entry point (runpy, no flags) on a fake
+  device and clock, so they check what the panel actually gets.
 - `experiments/` — scratch space for one-off tests. Things that prove out
   graduate to top-level scripts; things that don't can stay here or be
   deleted later. Scripts here add the repo root to `sys.path` to import
@@ -462,7 +465,12 @@ dim 34).
   | Counter, right-aligned in a "999/999" field | 41–47 | mid, 136 |
 
 - **Flags:** `--mid-grey`, `--played-grey`, `--total-grey` and
-  `--pipe-grey` (default 34, dim); `--wide-noise
+  `--pipe-grey` (default 34, dim). Their defaults and `PlayerScreen`'s
+  both come from `DEFAULT_GREYS`, the only place the tier values are
+  set; `tests/test_player_screen_defaults.py` checks them through the
+  script's entry point. (`b7e2d82` changed `PlayerScreen`'s `|` default
+  but not the flag's, so the panel stayed white while offline renders
+  were dim.) `--wide-noise
   pair|fullwidth` sets the scramble noise in double-width cells. To try
   the mockup's Row 3 greys on the live layout:
   `--mid-grey 128 --played-grey 114 --total-grey 38`. 128 is the same

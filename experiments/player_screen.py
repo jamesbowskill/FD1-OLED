@@ -57,10 +57,23 @@ BAR_COL, BAR_LEN = 6, 26
 TOTAL_COL = 33
 COUNTER_COL, COUNTER_WIDTH = 41, 7  # right-aligned in a "999/999" field
 
+# The validated grey tiers (panel level = value // 16; see CLAUDE.md).
 WHITE = (255, 255, 255)
-# Dim: panel level 2, validated on the panel. Used for the unplayed bar and
-# Row 2's |. (The mockup's white | was a Figma omission, not a design change.)
-DIM = (34, 34, 34)
+MID_GREY = 136  # level 8
+TOTAL_GREY = 68  # level 4
+# Dim, level 2: the unplayed bar and Row 2's |. (The mockup's white | was a
+# Figma omission, not a design change.)
+DIM_GREY = 34
+DIM = (DIM_GREY,) * 3
+# The only defaults for PlayerScreen's greys and the matching --*-grey flags.
+DEFAULT_GREYS = {
+    "mid_grey": MID_GREY,  # elapsed and counter
+    "played_grey": MID_GREY,  # played part of the bar
+    "total_grey": TOTAL_GREY,  # total duration
+    "pipe_grey": DIM_GREY,  # the | in Row 2
+}
+# What the mockup used, for the flags' help (try them with the flags).
+MOCKUP_GREYS = {"mid_grey": 128, "played_grey": 114, "total_grey": 38, "pipe_grey": 255}
 
 PLAYLIST = [
     ("ネオ東京上空の風", "芸能山城組", "Symphonic Suite AKIRA", 228),
@@ -162,12 +175,16 @@ def mmss(seconds):
 
 
 class PlayerScreen:
-    def __init__(self, mode, size, reveal_frames, rng, mid_grey=136, played_grey=136,
-                 total_grey=68, pipe_grey=DIM[0], wide_noise="pair"):
-        self.mid = (mid_grey,) * 3
-        self.played = (played_grey,) * 3
-        self.total = (total_grey,) * 3
-        self.pipe = (pipe_grey,) * 3
+    def __init__(self, mode, size, reveal_frames, rng, wide_noise="pair", **greys):
+        """greys: any of DEFAULT_GREYS' keys; the rest take their defaults."""
+        unknown = set(greys) - set(DEFAULT_GREYS)
+        if unknown:
+            raise TypeError(f"unknown greys: {sorted(unknown)}")
+        greys = {**DEFAULT_GREYS, **greys}
+        self.mid = (greys["mid_grey"],) * 3
+        self.played = (greys["played_grey"],) * 3
+        self.total = (greys["total_grey"],) * 3
+        self.pipe = (greys["pipe_grey"],) * 3
         self.canvas = Image.new(mode, size, "black")
         self.draw = ImageDraw.Draw(self.canvas)
         self.title = ScrollState(TITLE, TEXT_RIGHT + 1 - ROW1_X, reveal_frames, rng, wide_noise)
@@ -250,25 +267,33 @@ class PlayerScreen:
         self._draw_row3(self.row3["counter"], ROW3_X + COUNTER_COL * col, ROW3_Y, self.mid)
 
 
-def grey_arg(parser, name, default, help_text):
-    parser.add_argument(name, type=int, default=default, help=f"{help_text} grey 0-255")
+GREY_HELP = {
+    "mid_grey": "elapsed and counter",
+    "played_grey": "played part of the bar",
+    "total_grey": "total duration",
+    "pipe_grey": "the | in Row 2",
+}
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tick", type=float, default=SCRAMBLE_TICK, help="seconds per frame")
     parser.add_argument("--reveal", type=float, default=1.6, help="seconds per scramble reveal")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
-    grey_arg(parser, "--mid-grey", 136, "elapsed and counter (136 = level 8; mockup 128)")
-    grey_arg(parser, "--played-grey", 136, "played part of the bar (136 = level 8; mockup 114)")
-    grey_arg(parser, "--total-grey", 68, "total duration (68 = level 4; mockup 38)")
-    grey_arg(parser, "--pipe-grey", 255, "the | in Row 2 (34 = level 2, dim)")
+    for name, default in DEFAULT_GREYS.items():
+        parser.add_argument(f"--{name.replace('_', '-')}", type=int, default=default,
+                            help=f"{GREY_HELP[name]} grey 0-255 (default {default} = level "
+                                 f"{default // 16}; mockup {MOCKUP_GREYS[name]})")
     parser.add_argument("--wide-noise", choices=WIDE_NOISE_MODES, default="pair",
                         help="scramble noise in double-width cells")
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
-    greys = {"mid_grey": args.mid_grey, "played_grey": args.played_grey,
-             "total_grey": args.total_grey, "pipe_grey": args.pipe_grey}
+    greys = {name: getattr(args, name) for name in DEFAULT_GREYS}
     for name, value in greys.items():
         if not 0 <= value <= 255:
             parser.error(f"--{name.replace('_', '-')} must be 0-255")
