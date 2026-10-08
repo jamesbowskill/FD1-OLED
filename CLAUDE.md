@@ -74,6 +74,29 @@ rig's wiring, which has also been physically verified).
     - **Missing:** `ō ū Ō` (macrons), `–` and `—`, `〜` (U+301C), `•`,
       `€`, `髙`, `﨑` and Hangul. Missing characters render as a visible
       placeholder glyph, not a blank.
+  - **Outline versions** (the files used in Figma) are in the repo too:
+    `fonts/mplus/PixelMplus12-Regular.ttf` (plus Bold and the 10 px
+    family) and `fonts/unifont/unifont_jp-17.0.05.otf`. Compared glyph by
+    glyph against the BDFs (2026-10-08):
+    - **M+ matches exactly.** The merged BDF has the same 7,251 code
+      points as PixelMplus12-Regular.ttf, and every visible glyph has
+      identical geometry: sampling the outline at 8x gives the BDF's
+      pixels for all 7,217.
+    - **Don't render the TTF directly on the panel.** Pillow's
+      monochrome rasterising at 12 px shifts or clips an edge row on
+      about 2% of glyphs (mostly `$ ( ) [ ] { } | g j p q y Q`). The BDF
+      has no such problem.
+    - **Unifont differs by version, not format.** The OTF is 17.0.05 and
+      the BDF is 18.0.01, and 97.98% of shared glyphs are identical.
+      - 50 glyphs were redrawn in 18, including the kanji
+        `喞 称 遠 郷 響 頋`.
+      - The OTF also has 1,840 supplementary-plane kanji (Plane 2/3)
+        that the BDF lacks.
+    - **Combining marks take a full cell in the BDF.** The OTF gives them
+      zero width, while the BDF draws them in their own 8 or 16 px cell.
+      Decomposed (NFD) text, such as macOS filenames, would show `e` and
+      `´` side by side instead of `é`. M+ has no combining marks at all.
+      Normalise text to NFC before drawing.
 - `venv/` — Python venv with `luma.core`, `luma.oled`, `Pillow`, `watchdog`,
   etc. Always run scripts with `venv/bin/python3`, not system Python.
 - `rig` — picks which utility owns the OLED, one at a time. Nothing starts
