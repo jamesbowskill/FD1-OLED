@@ -496,12 +496,34 @@ dim 34).
 - **Status screen:** FD1's non-playing states (`no_drive`, `mount_error`,
   and the others in display.py's `STATE_MESSAGES`, copied verbatim) as
   one white line in `SUB` (M+ 12). FD1 draws it at (4, 12) in Pillow's
-  default font. This prototype puts it in Row 2's text area, (9, 26)
-  clipped at x 248, which is also roughly centred vertically. That
-  position is a first guess, not a reviewed design; `--x`/`--y` move it.
-  It scramble-reveals once, then holds (it would scroll if it
-  overflowed; the longest message, `finished`, is 222 of 240 px).
-  `./rig run status_screen.py mount_error`, or `--message TEXT`.
+  default font. **Final design (2026-10-08): centred on the panel.**
+  - **Horizontal:** x = (256 − `getlength(text)`) // 2, measured on the
+    prepared final text. All six messages have even widths, so the
+    advance box is exactly centred (`no_drive` 65/65 px margins,
+    `mount_error` 74/74). M+ glyphs leave their rightmost column blank,
+    so the ink itself sits half a pixel left of centre. The scramble
+    reveal draws each character at its final offset, so the line
+    doesn't shift while it decodes.
+  - **Vertical:** centres M+'s 12 px glyph band, not its 13 px cell.
+    Latin glyphs never ink the cell's top row, so the band is ascent +
+    descent − 1 = 12 rows (`GLYPH_TOP`, `GLYPH_BAND`). Cell top 25 puts
+    the band on panel rows 26–37, 26 px above and below. The position
+    comes from the metrics, not each message's ink, so the baseline is
+    the same whether or not a message has descenders (`No floppy drive
+    found` inks rows 26–37, `Disk can't be read` 26–35).
+  - A message wider than the text area (x 9–248) would start at x 9 and
+    scroll; the longest, `finished`, is 222 of 240 px.
+  - `--x`/`--y` override the cell position; `--stills DIR` renders every
+    message with the panel's centre lines drawn over it.
+  - It scramble-reveals once, then holds.
+    `./rig run status_screen.py mount_error`, or `--message TEXT`.
+  - **The busy screen centres its status differently.** It snaps the
+    status to the noise grid's 6 px columns, `x0 + (cols − chars) // 2 ×
+    advance`, so a message with an odd number of characters sits 3 px
+    left of centre ("Reading disk...": margins 80/86). Its centre row is
+    cell top 26, so the band is rows 27–38, 1 px below centre; the whole
+    noise grid inks rows 3–62 for the same reason (its 60 px is centred
+    as cells, top rows included). Left as is pending review.
 - **Busy screen:** `./rig run scramble_bg_test.py --message "Reading
   disk..."` holds one status instead of cycling `MESSAGES`.
 
