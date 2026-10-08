@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scramble-decode text reveal prototype (Latin only), Spleen bitmap font.
+"""Scramble-decode text reveal prototype (Latin only), in an oled_fonts role.
 
 Each character gets a random start and end frame within the overall
 duration: blank before its start, a new random noise glyph every frame until
@@ -21,26 +21,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from oled_common import get_device
+from oled_fonts import ROLES
 
-FONTS = {
-    8: ROOT / "fonts" / "spleen" / "spleen-5x8.bdf",
-    12: ROOT / "fonts" / "spleen" / "spleen-6x12.bdf",
-    16: ROOT / "fonts" / "spleen" / "spleen-8x16.bdf",
-}
 NOISE = string.ascii_uppercase + string.digits + "!#$%&*+-=?@<>/\\|~^"
 # ~25 fps. Deliberately not display.py's ANIMATION_TICK (0.08): 0.08 looked
 # too slow for this effect on the real panel (see CLAUDE.md).
 SCRAMBLE_TICK = 0.04
 TEXT_X, TEXT_Y = 4, 12  # display.py's LEFT_MARGIN / LINE1_Y
 MIN_NOISE_FRAMES = 3
-
-
-def load_font(px):
-    # ImageFont.load() can't read raw .bdf; FreeType can, at its native size only.
-    return ImageFont.truetype(str(FONTS[px]), size=px)
 
 
 def schedule(text, total_frames, rng):
@@ -68,7 +59,7 @@ def frame_chars(text, spans, frame, rng):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("text", nargs="?", default="SURE SHOT")
-    parser.add_argument("--size", type=int, choices=sorted(FONTS), default=16)
+    parser.add_argument("--role", choices=list(ROLES), default="title", help="oled_fonts role")
     parser.add_argument("--tick", type=float, default=SCRAMBLE_TICK, help="seconds per frame")
     parser.add_argument("--duration", type=float, default=1.6, help="seconds for the whole reveal")
     parser.add_argument("--hold", type=float, default=2.0, help="seconds to hold the final text")
@@ -76,9 +67,9 @@ def main():
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
     args = parser.parse_args()
 
-    font = load_font(args.size)
-    advance = int(font.getlength("M"))
-    box = (TEXT_X, TEXT_Y, TEXT_X + advance * len(args.text) - 1, TEXT_Y + args.size - 1)
+    role = ROLES[args.role]
+    font, advance = role.font, role.advance
+    box = (TEXT_X, TEXT_Y, TEXT_X + advance * len(args.text) - 1, TEXT_Y + role.cell_height - 1)
 
     device = get_device()
     if box[2] >= device.width:
@@ -107,7 +98,7 @@ def main():
         time.sleep(max(0.0, start_t + (frame + 1) * args.tick - time.perf_counter()))
     elapsed = time.perf_counter() - start_t
 
-    print(f"'{args.text}' at {args.size}px: {last_frame + 1} frames in {elapsed:.2f}s "
+    print(f"'{args.text}' in {role.name}: {last_frame + 1} frames in {elapsed:.2f}s "
           f"({(last_frame + 1) / elapsed:.1f} fps, tick {args.tick * 1000:.0f} ms)")
     print(f"Render+push per frame: mean {sum(render_ms) / len(render_ms):.1f} ms, "
           f"max {max(render_ms):.1f} ms")
