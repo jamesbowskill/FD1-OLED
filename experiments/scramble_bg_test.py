@@ -2,7 +2,8 @@
 """Fullscreen "busy state" prototype: scrambling noise background with a
 status message overlaid on the centre row.
 
-5 rows of noise in the sub font role run for as long as the script does, updating more
+5 rows of noise in the sub font role (stacked at its 12px pitch, though the
+M+ cell is 13px: noise and uppercase never ink the cell's top row) run for as long as the script does, updating more
 slowly than the frame rate: every --bg-interval ticks, a random
 --bg-fraction of the cells take a new noise character and the rest hold.
 The centre row's status message reveals via scramble_test.py's
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from scramble_test import NOISE, SCRAMBLE_TICK, frame_chars, schedule
+from scramble_test import NOISE, SCRAMBLE_TICK, draw_items, frame_items, schedule
 from oled_common import get_device
 from oled_fonts import SUB
 
@@ -33,25 +34,29 @@ STATS_EVERY_S = 10.0
 class StatusReveal:
     """Scramble-reveals the status text, restarting only on a real change."""
 
-    def __init__(self, reveal_frames, rng):
+    def __init__(self, role, reveal_frames, rng):
+        self.role = role
         self.reveal_frames = reveal_frames
         self.rng = rng
         self.text = None
+        self.offsets = []
         self.spans = []
         self.frame = 0
 
     def set_text(self, text):
+        text = self.role.prepare(text)
         if text == self.text:
             return False
         self.text = text
+        self.offsets = self.role.layout(text)
         self.spans = schedule(text, self.reveal_frames, self.rng)
         self.frame = 0
         return True
 
-    def next_chars(self):
-        chars = frame_chars(self.text, self.spans, self.frame, self.rng)
+    def next_items(self):
+        items = frame_items(self.text, self.spans, self.frame, self.rng, self.role)
         self.frame += 1
-        return "".join(chars)
+        return items
 
 
 def main():
@@ -74,7 +79,7 @@ def main():
         parser.error("--bg-fraction must be between 0 and 1")
 
     rng = random.Random(args.seed)
-    font, advance, pitch = SUB.font, SUB.advance, SUB.cell_height
+    font, advance, pitch = SUB.font, SUB.advance, SUB.pitch
 
     device = get_device()
     cols = device.width // advance
@@ -88,7 +93,7 @@ def main():
 
     canvas = Image.new(device.mode, device.size, "black")
     draw = ImageDraw.Draw(canvas)
-    status = StatusReveal(max(1, round(args.reveal / args.tick)), rng)
+    status = StatusReveal(SUB, max(1, round(args.reveal / args.tick)), rng)
     if args.save_frames:
         args.save_frames.mkdir(parents=True, exist_ok=True)
 
@@ -114,10 +119,11 @@ def main():
         for row in range(ROWS):
             draw.text((x0, y0 + row * pitch), "".join(grid[row]), font=font, fill=bg)
 
-        status_x = x0 + (cols - len(message)) // 2 * advance
-        draw.rectangle((status_x, status_y, status_x + len(message) * advance - 1,
+        width = int(font.getlength(status.text))
+        status_x = x0 + (cols - width // advance) // 2 * advance
+        draw.rectangle((status_x, status_y, status_x + width - 1,
                         status_y + SUB.cell_height - 1), fill="black")
-        draw.text((status_x, status_y), status.next_chars(), font=font, fill="white")
+        draw_items(draw, (status_x, status_y), SUB, status.offsets, status.next_items(), "white")
 
         device.display(canvas)
         (refresh_ms if bg_refresh else other_ms).append((time.perf_counter() - t0) * 1000)

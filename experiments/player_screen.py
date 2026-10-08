@@ -2,23 +2,28 @@
 """Player screen prototype: all three rows, real fonts, scroll and scramble
 triggers, driven by a mock playlist (no mpv/jukebox).
 
-  Row 1  title            TITLE font role, full width, scrolls if it overflows
-  Row 2  artist | album   SUB font role, full width, scrolls if it overflows
-  Row 3  elapsed, progress bar, total, track counter   MONO8 font role
-(roles from oled_fonts; currently Spleen 8x16, 6x12 and 5x8.)
+  Row 1  title            TITLE role (Unifont JP), scrolls if it overflows
+  Row 2  artist | album   SUB role (M+ 12), scrolls if it overflows
+  Row 3  elapsed, total, counter in TIMER (Spleen 6x12); bar in SUB
+
+Positions and greys match James's Figma mockup of 2026-10-08
+(incoming/OLED.png) pixel for pixel, except that the mockup's Row 2 sits
+3/8 px off the pixel grid (y=26.375) and is anti-aliased; the panel draws it
+crisp at y=26.
 
 Scramble rules:
   - Every element scrambles in once, on the initial paint.
   - After that, the title re-scrambles on every track change, interrupting
     whatever is in flight; artist | album re-scrambles only if that string
     actually changed.
-  - Row 3 (elapsed, bar, total, counter) never scrambles again: it resets
-    and updates silently, including on track changes.
-Positions come from James's Figma export (incoming/OLED.png): rows 1-2
-match Spleen renders pixel for pixel; row 3 sits on the same 5px grid.
-Four grey tiers: white (rows 1-2 text only); --mid-grey (elapsed, played
-bar, counter); --total-grey (total duration); and the panel-validated dim
-level 2 (34,34,34) for the unplayed bar and the | separator.
+  - Row 3 never scrambles again: it resets and updates silently, including
+    on track changes.
+All display text goes through the role's prepare() (NFC + substitutions)
+before it is measured or drawn. Scramble items are drawn at each
+character's final position, so double-width text never reflows.
+
+PlayerScreen does the drawing and is importable, so stills can be rendered
+offline (experiments/font_stills.py) with exactly the panel's code.
 """
 
 import argparse
@@ -31,9 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PIL import Image, ImageDraw
 
-from oled_common import get_device
-from oled_fonts import MONO8, SUB, TITLE
-from scramble_test import SCRAMBLE_TICK, frame_chars, schedule
+from oled_fonts import SUB, TIMER, TITLE
+from scramble_test import SCRAMBLE_TICK, WIDE_NOISE_MODES, draw_items, frame_items, schedule
 
 # display.py's scroll cadence and speed. Scrolling keeps this pace even
 # though the loop ticks at SCRAMBLE_TICK (see CLAUDE.md on the two paces).
@@ -41,27 +45,26 @@ SCROLL_TICK = 0.08
 SCROLL_PAUSE_DURATION = 1.5
 SCROLL_SPEED_PX = 3
 
-TEXT_X = 9
-TEXT_WIDTH = 240  # x 9..248: 30 cols at 8px, 40 at 6px, 48 at 5px
-ROW1_Y, ROW2_Y, ROW3_Y = 10, 29, 47
+# Cell top-left positions from the Figma mockup. Rows 1-2 clip at x=248.
+TEXT_RIGHT = 248
+ROW1_X, ROW1_Y = 8, 6
+ROW2_X, ROW2_Y = 9, 26
+ROW3_Y = 47                       # TIMER cells (elapsed, total, counter)
+ELAPSED_X, TOTAL_X = 9, 157
+COUNTER_RIGHT, COUNTER_WIDTH = 250, 7  # right-aligned in a "999/999" field
+BAR_X, BAR_Y, BAR_LEN = 50, 45, 16     # SUB slashes
 
 WHITE = (255, 255, 255)
-# Panel level 2, validated on the panel for the busy-state background.
-DIM = (34, 34, 34)
-
-# Row 3 columns on the 5px grid (48 cols from x=9).
-ELAPSED_COL = 0
-BAR_COL, BAR_LEN = 6, 26
-TOTAL_COL = 33
-COUNTER_COL, COUNTER_WIDTH = 41, 7  # worst case "999/999"
+# Mockup greys: elapsed/counter 128 (level 8), played bar 114 (level 7),
+# total and unplayed bar 38 (level 2). The | is white like the rest of Row 2.
+UNPLAYED = (38, 38, 38)
 
 PLAYLIST = [
-    ("Sure Shot", "Beastie Boys", "Ill Communication", 199),
-    ("Sabotage", "Beastie Boys", "Ill Communication", 178),
-    ("Chicago (Adult Contemporary Easy Listening Version)",
-     "Sufjan Stevens", "The Avalanche", 318),
-    ("Storm", "Godspeed You! Black Emperor",
-     "Lift Your Skinny Fists Like Antennas to Heaven", 1352),
+    ("ネオ東京上空の風", "芸能山城組", "Symphonic Suite AKIRA", 228),
+    ("Kaneda", "芸能山城組", "Symphonic Suite AKIRA", 219),
+    ("Tong Poo — 東風", "Ryūichi Sakamoto", "Tōkyō Melody", 301),
+    ("千と千尋の神隠し サウンドトラック 〜あの夏へ〜 (Live 2008)", "久石譲", "千と千尋の神隠し", 1352),
+    ("ｿﾘｯﾄﾞ･ｽﾃｲﾄ･ｻｳﾞｧｲｳﾞｧｰ", "YMO", "髙橋幸宏 Selection — Live", 250),
 ]
 # MOCK-ONLY SCAFFOLDING, not part of the design: each track lasts this many
 # real seconds, and its elapsed time is sped up to fill the bar in that
@@ -76,12 +79,14 @@ class ScrollState:
     primitive) on each new text first, then hand off to scrolling, and to
     work within a strip `width` px wide starting at x=0."""
 
-    def __init__(self, font, width, reveal_frames, rng):
-        self.font = font
+    def __init__(self, role, width, reveal_frames, rng, wide_noise="pair"):
+        self.role = role
         self.width = width
         self.reveal_frames = reveal_frames
         self.rng = rng
+        self.wide_noise = wide_noise
         self.text = None
+        self.offsets = []
         self.text_width = 0
         self.x = 0
         self.phase = "static"
@@ -92,10 +97,10 @@ class ScrollState:
 
     def set_text(self, text, force=False):
         """Start a reveal of `text`; skipped if unchanged unless forced."""
+        text = self.role.prepare(text)
         if text == self.text and not force:
             return False
-        self.text = text
-        self.text_width = self.font.getlength(text)
+        self._measure(text)
         self.x = 0
         self.phase = "revealing"
         self.spans = schedule(text, self.reveal_frames, self.rng)
@@ -105,15 +110,22 @@ class ScrollState:
 
     def update_text(self, text):
         """Change the text silently: no reveal restart, no scroll reset."""
-        self.text = text
+        self._measure(self.role.prepare(text))
 
-    def visible_text(self):
-        """Text to draw this frame; advances an active reveal by one frame."""
+    def _measure(self, text):
+        self.text = text
+        self.offsets = self.role.layout(text)
+        self.text_width = self.role.font.getlength(text)
+
+    def visible_items(self):
+        """Items to draw this frame, or None once the reveal is over (draw
+        self.text). Advances an active reveal by one frame."""
         if self.phase != "revealing":
-            return self.text
-        chars = frame_chars(self.text, self.spans, self.reveal_frame, self.rng)
+            return None
+        items = frame_items(self.text, self.spans, self.reveal_frame, self.rng, self.role,
+                            self.wide_noise)
         self.reveal_frame += 1
-        return "".join(chars)
+        return items
 
     def tick(self, now, scroll_step):
         if self.phase == "revealing":
@@ -146,58 +158,127 @@ def mmss(seconds):
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
+class PlayerScreen:
+    def __init__(self, mode, size, reveal_frames, rng, mid_grey=128, played_grey=114,
+                 total_grey=38, pipe_grey=255, wide_noise="pair"):
+        self.mid = (mid_grey,) * 3
+        self.played = (played_grey,) * 3
+        self.total = (total_grey,) * 3
+        self.pipe = (pipe_grey,) * 3
+        self.canvas = Image.new(mode, size, "black")
+        self.draw = ImageDraw.Draw(self.canvas)
+        self.title = ScrollState(TITLE, TEXT_RIGHT + 1 - ROW1_X, reveal_frames, rng, wide_noise)
+        self.artist_album = ScrollState(SUB, TEXT_RIGHT + 1 - ROW2_X, reveal_frames, rng, wide_noise)
+        self.row3 = {name: ScrollState(SUB if name == "bar" else TIMER, size[0], reveal_frames, rng)
+                     for name in ("elapsed", "bar", "total", "counter")}
+        self.strips = {
+            "title": Image.new(mode, (self.title.width, TITLE.cell_height)),
+            "sub": Image.new(mode, (self.artist_album.width, SUB.cell_height)),
+        }
+        self.bar_done = 0
+
+    def show_track(self, name, artist, album, duration, number, count, first):
+        """Returns whether artist | album changed (and so re-scrambles)."""
+        self.title.set_text(name, force=True)
+        row2_changed = self.artist_album.set_text(f"{artist} | {album}")
+        row3_text = {
+            "elapsed": mmss(0),
+            "bar": "/" * BAR_LEN,
+            "total": mmss(duration),
+            "counter": f"{number}/{count}".rjust(COUNTER_WIDTH),
+        }
+        for key, text in row3_text.items():
+            if first:
+                self.row3[key].set_text(text, force=True)
+            else:
+                self.row3[key].update_text(text)
+        return row2_changed
+
+    def set_elapsed(self, elapsed, duration):
+        self.row3["elapsed"].update_text(mmss(elapsed))
+        self.bar_done = int(elapsed / duration * BAR_LEN)
+
+    def tick(self, now, scroll_step):
+        for state in (self.title, self.artist_album, *self.row3.values()):
+            state.tick(now, scroll_step)
+
+    def _draw_scrolling(self, state, strip_name, x, y, pipe=None):
+        strip = self.strips[strip_name]
+        sdraw = ImageDraw.Draw(strip)
+        sdraw.rectangle((0, 0, strip.width - 1, strip.height - 1), fill="black")
+        items = state.visible_items()
+        if items is None:
+            sdraw.text((state.x, 0), state.text, font=state.role.font, fill=WHITE)
+        else:
+            draw_items(sdraw, (state.x, 0), state.role, state.offsets, items, WHITE)
+        if pipe and pipe != WHITE and " | " in state.text:
+            i = state.text.index(" | ") + 1
+            px = state.x + state.offsets[i]
+            sdraw.rectangle((px, 0, px + state.role.advance - 1, strip.height - 1), fill="black")
+            char = state.text[i] if items is None else items[i]
+            if char:
+                sdraw.text((px, 0), char, font=state.role.font, fill=pipe)
+        self.canvas.paste(strip, (x, y))
+
+    def _draw_row3(self, state, x, y, fill):
+        items = state.visible_items()
+        if items is None:
+            self.draw.text((x, y), state.text, font=state.role.font, fill=fill)
+        else:
+            draw_items(self.draw, (x, y), state.role, state.offsets, items, fill)
+
+    def render(self):
+        w, h = self.canvas.size
+        self.draw.rectangle((0, 0, w - 1, h - 1), fill="black")
+        self._draw_scrolling(self.title, "title", ROW1_X, ROW1_Y)
+        self._draw_scrolling(self.artist_album, "sub", ROW2_X, ROW2_Y, pipe=self.pipe)
+        self._draw_row3(self.row3["elapsed"], ELAPSED_X, ROW3_Y, self.mid)
+        bar = self.row3["bar"]
+        items = bar.visible_items() or list(bar.text)
+        draw_items(self.draw, (BAR_X, BAR_Y), SUB, bar.offsets, items, UNPLAYED)
+        if self.bar_done:
+            draw_items(self.draw, (BAR_X, BAR_Y), SUB, bar.offsets[:self.bar_done],
+                       items[:self.bar_done], self.played)
+        self._draw_row3(self.row3["total"], TOTAL_X, ROW3_Y, self.total)
+        counter_x = COUNTER_RIGHT - COUNTER_WIDTH * TIMER.advance
+        self._draw_row3(self.row3["counter"], counter_x, ROW3_Y, self.mid)
+
+
+def grey_arg(parser, name, default, help_text):
+    parser.add_argument(name, type=int, default=default, help=f"{help_text} grey 0-255")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tick", type=float, default=SCRAMBLE_TICK, help="seconds per frame")
     parser.add_argument("--reveal", type=float, default=1.6, help="seconds per scramble reveal")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
-    parser.add_argument("--total-grey", type=int, default=68,
-                        help="total duration grey 0-255 (68 = panel level 4)")
-    parser.add_argument("--mid-grey", type=int, default=136,
-                        help="elapsed, played bar and counter grey 0-255 (136 = level 8)")
+    grey_arg(parser, "--mid-grey", 128, "elapsed and counter (128 = level 8)")
+    grey_arg(parser, "--played-grey", 114, "played part of the bar (114 = level 7)")
+    grey_arg(parser, "--total-grey", 38, "total duration (38 = level 2)")
+    grey_arg(parser, "--pipe-grey", 255, "the | in Row 2 (255 = white, as in the mockup)")
+    parser.add_argument("--wide-noise", choices=WIDE_NOISE_MODES, default="pair",
+                        help="scramble noise in double-width cells")
     args = parser.parse_args()
-    for flag, value in (("--total-grey", args.total_grey), ("--mid-grey", args.mid_grey)):
+    greys = {"mid_grey": args.mid_grey, "played_grey": args.played_grey,
+             "total_grey": args.total_grey, "pipe_grey": args.pipe_grey}
+    for name, value in greys.items():
         if not 0 <= value <= 255:
-            parser.error(f"{flag} must be 0-255")
-    total_grey = (args.total_grey,) * 3
-    mid_grey = (args.mid_grey,) * 3
-    print(f"Row 3 greys: mid {args.mid_grey} (level {args.mid_grey // 16}), "
-          f"total {args.total_grey} (level {args.total_grey // 16}), dim {DIM[0]} (level {DIM[0] // 16})")
+            parser.error(f"--{name.replace('_', '-')} must be 0-255")
 
-    rng = random.Random(args.seed)
-    adv8 = MONO8.advance
-    reveal_frames = max(1, round(args.reveal / args.tick))
-    scroll_every = max(1, round(SCROLL_TICK / args.tick))
-
-    title = ScrollState(TITLE.font, TEXT_WIDTH, reveal_frames, rng)
-    artist_album = ScrollState(SUB.font, TEXT_WIDTH, reveal_frames, rng)
-    row3 = {name: ScrollState(MONO8.font, TEXT_WIDTH, reveal_frames, rng)
-            for name in ("elapsed", "bar", "total", "counter")}
+    from oled_common import get_device
 
     device = get_device()
-    canvas = Image.new(device.mode, device.size, "black")
-    draw = ImageDraw.Draw(canvas)
-    strips = {role.name: Image.new(device.mode, (TEXT_WIDTH, role.cell_height)) for role in (TITLE, SUB)}
+    rng = random.Random(args.seed)
+    reveal_frames = max(1, round(args.reveal / args.tick))
+    scroll_every = max(1, round(SCROLL_TICK / args.tick))
+    screen = PlayerScreen(device.mode, device.size, reveal_frames, rng,
+                          wide_noise=args.wide_noise, **greys)
     if args.save_frames:
         args.save_frames.mkdir(parents=True, exist_ok=True)
-
-    def draw_scrolling(state, role, y, pipe_grey=None):
-        strip = strips[role.name]
-        sdraw = ImageDraw.Draw(strip)
-        sdraw.rectangle((0, 0, strip.width - 1, strip.height - 1), fill="black")
-        text = state.visible_text()
-        sdraw.text((state.x, 0), text, font=role.font, fill=WHITE)
-        if pipe_grey and " | " in state.text:
-            i = state.text.index(" | ") + 1
-            adv = role.advance
-            cx = state.x + i * adv
-            sdraw.rectangle((cx, 0, cx + adv - 1, role.cell_height - 1), fill="black")
-            sdraw.text((cx, 0), text[i], font=role.font, fill=pipe_grey)
-        canvas.paste(strip, (TEXT_X, y))
-
-    def draw_row3_text(state, col, fill):
-        draw.text((TEXT_X + col * adv8, ROW3_Y), state.visible_text(), font=MONO8.font, fill=fill)
+    print("greys: " + ", ".join(f"{k} {v} (level {v // 16})" for k, v in greys.items())
+          + f"; wide-cell noise: {args.wide_noise}")
 
     track = None
     frame = 0
@@ -209,49 +290,24 @@ def main():
         name, artist, album, duration = PLAYLIST[index]
         into_track = (t0 - start_t) % TRACK_SECONDS
         elapsed = min(duration, into_track / TRACK_SECONDS * duration)  # mock acceleration
-        bar_done = int(elapsed / duration * BAR_LEN)
 
         if index != track:
             first = track is None
             track = index
-            title.set_text(name, force=True)
-            row2_changed = artist_album.set_text(f"{artist} | {album}")
-            row3_text = {
-                "elapsed": mmss(elapsed),
-                "bar": "/" * BAR_LEN,
-                "total": mmss(duration),
-                "counter": f"{index + 1}/{len(PLAYLIST)}".rjust(COUNTER_WIDTH),
-            }
-            for key, text in row3_text.items():
-                if first:
-                    row3[key].set_text(text, force=True)
-                else:
-                    row3[key].update_text(text)
+            changed = screen.show_track(name, artist, album, duration, index + 1, len(PLAYLIST), first)
             print(f"track {index + 1}: {name!r}; artist|album "
-                  f"{'re-scrambled' if row2_changed else 'unchanged, not re-scrambled'}"
+                  f"{'re-scrambled' if changed else 'unchanged, not re-scrambled'}"
                   f"{'; initial paint, everything scrambles in' if first else '; row 3 updated silently'}")
-        row3["elapsed"].update_text(mmss(elapsed))
+        screen.set_elapsed(elapsed, duration)
 
-        draw.rectangle((0, 0, device.width - 1, device.height - 1), fill="black")
-        draw_scrolling(title, TITLE, ROW1_Y)
-        draw_scrolling(artist_album, SUB, ROW2_Y, pipe_grey=DIM)
-        draw_row3_text(row3["elapsed"], ELAPSED_COL, mid_grey)
-        bar = row3["bar"].visible_text()
-        draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar, font=MONO8.font, fill=DIM)
-        if bar_done:
-            draw.text((TEXT_X + BAR_COL * adv8, ROW3_Y), bar[:bar_done], font=MONO8.font, fill=mid_grey)
-        draw_row3_text(row3["total"], TOTAL_COL, total_grey)
-        draw_row3_text(row3["counter"], COUNTER_COL, mid_grey)
-
-        device.display(canvas)
+        screen.render()
+        device.display(screen.canvas)
         frame_ms.append((time.perf_counter() - t0) * 1000)
         if args.save_frames:
-            canvas.save(args.save_frames / f"frame_{frame:04d}.png")
+            screen.canvas.save(args.save_frames / f"frame_{frame:04d}.png")
 
         now = time.perf_counter()
-        scroll_step = frame % scroll_every == 0
-        for state in (title, artist_album, *row3.values()):
-            state.tick(now, scroll_step)
+        screen.tick(now, frame % scroll_every == 0)
 
         frame += 1
         if now - stats_t >= STATS_EVERY_S:

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Scramble-decode text reveal prototype (Latin only), in an oled_fonts role.
+"""Scramble-decode text reveal prototype, in an oled_fonts role. Also the
+shared scramble primitive (schedule, frame_items, draw_items).
 
 Each character gets a random start and end frame within the overall
-duration: blank before its start, a new random noise glyph every frame until
-its end, then locked to the target character. Spaces stay blank throughout
-so the word shapes read early. Runs once, holds the final text, and exits
+duration: blank before its start, a new random Latin noise glyph every frame
+until its end, then locked to the target character. Whitespace (including
+U+3000) stays blank throughout so the word shapes read early. Every item is
+drawn at its character's final position, so double-width text never
+reflows; wide cells get two narrow noise glyphs (or one full-width glyph
+with --wide-noise fullwidth). Runs once, holds the final text, and exits
 (persist=True leaves the text on screen).
 
 Only the text's bounding box is redrawn on a persistent frame each tick;
@@ -27,6 +31,9 @@ from oled_common import get_device
 from oled_fonts import ROLES
 
 NOISE = string.ascii_uppercase + string.digits + "!#$%&*+-=?@<>/\\|~^"
+# The same characters as full-width forms (U+FF01..U+FF5E), one per wide cell.
+FULLWIDTH_NOISE = "".join(chr(ord(c) + 0xFEE0) for c in NOISE)
+WIDE_NOISE_MODES = ("pair", "fullwidth")
 # ~25 fps. Deliberately not display.py's ANIMATION_TICK (0.08): 0.08 looked
 # too slow for this effect on the real panel (see CLAUDE.md).
 SCRAMBLE_TICK = 0.04
@@ -44,16 +51,35 @@ def schedule(text, total_frames, rng):
     return spans
 
 
-def frame_chars(text, spans, frame, rng):
-    chars = []
+def frame_items(text, spans, frame, rng, role, wide_noise="pair"):
+    """What to draw at each character position this frame: "" (blank, also
+    for any whitespace including U+3000), noise, or the character itself.
+    Noise in a double-width position is two narrow glyphs ("pair") or one
+    full-width glyph ("fullwidth"), so it fills the cell the character will
+    occupy."""
+    items = []
     for ch, (start, end) in zip(text, spans):
-        if ch == " " or frame < start:
-            chars.append(" ")
+        if ch.isspace() or frame < start:
+            items.append("")
         elif frame < end:
-            chars.append(rng.choice(NOISE))
+            if not role.is_wide(ch):
+                items.append(rng.choice(NOISE))
+            elif wide_noise == "fullwidth":
+                items.append(rng.choice(FULLWIDTH_NOISE))
+            else:
+                items.append(rng.choice(NOISE) + rng.choice(NOISE))
         else:
-            chars.append(ch)
-    return chars
+            items.append(ch)
+    return items
+
+
+def draw_items(draw, xy, role, offsets, items, fill):
+    """Draw each item at its character's final x offset (role.layout of the
+    final text), so a scramble never reflows the line."""
+    x, y = xy
+    for dx, item in zip(offsets, items):
+        if item:
+            draw.text((x + dx, y), item, font=role.font, fill=fill)
 
 
 def main():
@@ -65,18 +91,22 @@ def main():
     parser.add_argument("--hold", type=float, default=2.0, help="seconds to hold the final text")
     parser.add_argument("--seed", type=int, help="fix the random pattern to compare settings")
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
+    parser.add_argument("--wide-noise", choices=WIDE_NOISE_MODES, default="pair",
+                        help="noise in double-width cells")
     args = parser.parse_args()
 
     role = ROLES[args.role]
-    font, advance = role.font, role.advance
-    box = (TEXT_X, TEXT_Y, TEXT_X + advance * len(args.text) - 1, TEXT_Y + role.cell_height - 1)
+    text = role.prepare(args.text)
+    width = int(role.font.getlength(text))
+    offsets = role.layout(text)
+    box = (TEXT_X, TEXT_Y, TEXT_X + width - 1, TEXT_Y + role.cell_height - 1)
 
     device = get_device()
     if box[2] >= device.width:
-        sys.exit(f"'{args.text}' is {advance * len(args.text)}px wide; doesn't fit at x={TEXT_X}")
+        sys.exit(f"'{text}' is {width}px wide; doesn't fit at x={TEXT_X}")
 
     rng = random.Random(args.seed)
-    spans = schedule(args.text, max(1, round(args.duration / args.tick)), rng)
+    spans = schedule(text, max(1, round(args.duration / args.tick)), rng)
     last_frame = max(end for _, end in spans)
 
     canvas = Image.new(device.mode, device.size, "black")
@@ -89,8 +119,8 @@ def main():
     for frame in range(last_frame + 1):
         t0 = time.perf_counter()
         draw.rectangle(box, fill="black")
-        for i, ch in enumerate(frame_chars(args.text, spans, frame, rng)):
-            draw.text((TEXT_X + i * advance, TEXT_Y), ch, font=font, fill="white")
+        items = frame_items(text, spans, frame, rng, role, args.wide_noise)
+        draw_items(draw, (TEXT_X, TEXT_Y), role, offsets, items, "white")
         device.display(canvas)
         render_ms.append((time.perf_counter() - t0) * 1000)
         if args.save_frames:
@@ -98,7 +128,7 @@ def main():
         time.sleep(max(0.0, start_t + (frame + 1) * args.tick - time.perf_counter()))
     elapsed = time.perf_counter() - start_t
 
-    print(f"'{args.text}' in {role.name}: {last_frame + 1} frames in {elapsed:.2f}s "
+    print(f"'{text}' in {role.name}: {last_frame + 1} frames in {elapsed:.2f}s "
           f"({(last_frame + 1) / elapsed:.1f} fps, tick {args.tick * 1000:.0f} ms)")
     print(f"Render+push per frame: mean {sum(render_ms) / len(render_ms):.1f} ms, "
           f"max {max(render_ms):.1f} ms")
