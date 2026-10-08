@@ -23,9 +23,11 @@ rig's wiring, which has also been physically verified).
   because Pillow's outline rasteriser clips edge rows at these sizes.
   - **Roles** (font swap, 2026-10-08):
     - `TITLE`: Unifont JP 18.0.01, the 16 px title row.
-    - `SUB`: merged M+ 12 Regular, for artist/album, the progress bar,
-      busy-screen status and noise, and the status line.
-    - `TIMER`: Spleen 6x12, for Row 3's times and counter.
+    - `SUB`: merged M+ 12 Regular, for artist/album, busy-screen status
+      and noise, and FD1's `no_drive`/`mount_error` status line (which
+      this rig doesn't have yet; it gets built when display.py is ported).
+    - `TIMER`: Spleen 5x8, for all of Row 3 (times, bar and counter),
+      unchanged from the live design.
   - **Metrics:** each role reads `size`, `ascent`, `descent` and
     `cell_height` (strip height) from its BDF header. It also has a
     `pitch` (distance between stacked rows): `SUB` uses 12 although its
@@ -64,8 +66,8 @@ rig's wiring, which has also been physically verified).
     `fonts/mplus/build_unicode_bdf.py` (`r` or `b` for the weight).
     Regular was confirmed by matching the Figma mockup; Bold is 401
     pixels off.
-  - Spleen 8x16 and 5x8 are no longer used, and Spleen 6x12 now serves
-    only `TIMER`.
+  - Spleen 8x16 and 6x12 are no longer used; Spleen 5x8 stays as
+    `TIMER`.
 
   Measured on this Pi 3B+:
   - **Unifont JP** (`unifont_jp-18.0.01.bdf`) is one Unicode BDF:
@@ -419,31 +421,43 @@ limit: a text-sized region redraws in about 5–6 ms.
 
 ## Player screen layout (`experiments/player_screen.py`)
 
-Matches James's Figma mockup of 2026-10-08 (`incoming/OLED.png`) pixel
-for pixel: `experiments/font_stills.py` reproduces it, and every pixel
-matches except Row 2's anti-aliasing. The mockup's Row 2 layer sits at
-y = 26.375, so Figma blends it into 281 pixels of grey 159 and 281 of 96.
-The panel draws it crisp at y=26, its nearest whole pixel.
+Rows 1–2 match James's Figma mockup of 2026-10-08 (`incoming/OLED.png`)
+pixel for pixel: `experiments/font_stills.py` reproduces it, and every
+Row 1–2 pixel matches except Row 2's anti-aliasing. The mockup's Row 2
+layer sits at y = 26.375, so Figma blends it into 281 pixels of grey 159
+and 281 of 96. The panel draws it crisp at y=26, its nearest whole pixel.
 
-- **Rows (cell top-left, from the mockup):**
+**Row 3 is not from the mockup.** Figma has no 8 px Spleen, so the
+mockup's Row 3 (Spleen 6x12 times, an M+ bar) was a rendering artifact,
+not a design change. Spleen 5x8 is the device font for Row 3, laid out
+exactly as on the live player screen before the font swap (checked frame
+for frame against `cb5f5aa`). `font_stills.py` only compares rows 1–2.
+
+- **Rows 1–2 (cell top-left, from the mockup):**
 
   | Element | Font role | Position | Grey |
   |---|---|---|---|
   | Row 1 title | `TITLE` (Unifont) | (8, 6), clip at x 248 | 255 |
   | Row 2 `artist \| album` | `SUB` (M+), 13 px strip | (9, 26), clip at x 248 | 255, including the `\|` |
-  | Elapsed | `TIMER` (Spleen 6x12) | (9, 47) | 128 (level 8) |
-  | Progress bar, 16 slashes | `SUB` | (50, 45) | 114 played (level 7), 38 unplayed (level 2) |
-  | Total | `TIMER` | (157, 47) | 38 (level 2) |
-  | Counter, right-aligned in a "999/999" field | `TIMER` | ends at x 250 | 128 |
+
+- **Row 3:** `TIMER` (Spleen 5x8), cell y 47, on a 48-column grid from
+  x 9 (5 px columns):
+
+  | Element | Columns | Grey |
+  |---|---|---|
+  | Elapsed | 0–4 | mid, 136 (level 8) |
+  | Progress bar, 26 slashes | 6–31 | played 136 (level 8), unplayed 34 (level 2) |
+  | Total | 33–37 | 68 (level 4) |
+  | Counter, right-aligned in a "999/999" field | 41–47 | mid, 136 |
 
 - **Flags:** `--mid-grey`, `--played-grey`, `--total-grey` and
-  `--pipe-grey` default to the mockup's values; `--wide-noise
-  pair|fullwidth` sets the scramble noise in double-width cells.
-- **What changed from the earlier design:**
-  - Row 3 was laid out on a 48-column Spleen 5x8 grid with a 26-slash bar.
-  - The `|` was dim, and the total was 68 (level 4).
-  - The mockup moved Row 3 to Spleen 6x12 with an M+ bar, made the `|`
-    white, and dropped the total to level 2.
+  `--pipe-grey` (default 255, the mockup's white `|`); `--wide-noise
+  pair|fullwidth` sets the scramble noise in double-width cells. To try
+  the mockup's Row 3 greys on the live layout:
+  `--mid-grey 128 --played-grey 114 --total-grey 38`. 128 is the same
+  panel level as 136, so only played (7 vs 8) and total (2 vs 4) change
+  what the panel shows. The mockup's unplayed 38 is level 2, the same as
+  the 34 already used.
 - **Code:** drawing lives in `PlayerScreen`, so `font_stills.py` renders
   offline with exactly the panel's code. All text goes through
   `role.prepare()` before it is measured, scrambled or drawn.
@@ -483,7 +497,10 @@ The panel draws it crisp at y=26, its nearest whole pixel.
 - **Busy-state background (`experiments/scramble_bg_test.py`), validated
   defaults:** `--bg-interval 2`, `--bg-fraction 0.15` (32 of 210 cells
   change every 2nd tick), `--bg-grey 34`, with the status reveal every
-  tick at 0.04 s. Alternatives looked worse on the panel:
+  tick at 0.04 s. Since the font swap the grid is `SUB` (M+ 12, 6 px
+  advance): 42 x 5 = 210 cells at (2, 2), rows at the 12 px pitch, ink
+  y 3–62; the cell count and these defaults are unchanged.
+  Alternatives looked worse on the panel:
   - every cell on every tick: "panic-inducing";
   - `--bg-interval 1`: too busy and intense;
   - `--bg-interval 8 --bg-fraction 0.08`: too pedestrian.

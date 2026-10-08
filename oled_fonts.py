@@ -81,9 +81,10 @@ TITLE = FontRole("title", FONT_DIR / "unifont" / "unifont_jp-18.0.01.bdf")
 # screen stacks rows at 12px (5 x 12 = 60px fits the 64px panel).
 SUB = FontRole("sub", FONT_DIR / "mplus" / "mplus12r-unicode.bdf", pitch=12,
                substitutions=SUB_SUBSTITUTIONS)
-# Row 3 times and counter. James's 2026-10-08 Figma mockup uses Spleen 6x12
-# here (not 5x8); the progress bar uses SUB.
-TIMER = FontRole("timer", FONT_DIR / "spleen" / "spleen-6x12.bdf")
+# Row 3: times, counter and progress bar. Spleen 5x8, as on the live
+# player screen; the 2026-10-08 Figma mockup's Row 3 was a rendering
+# artifact (Figma has no 8px Spleen), not a design change.
+TIMER = FontRole("timer", FONT_DIR / "spleen" / "spleen-5x8.bdf")
 ROLES = {role.name: role for role in (TITLE, SUB, TIMER)}
 
 

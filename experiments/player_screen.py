@@ -4,12 +4,13 @@ triggers, driven by a mock playlist (no mpv/jukebox).
 
   Row 1  title            TITLE role (Unifont JP), scrolls if it overflows
   Row 2  artist | album   SUB role (M+ 12), scrolls if it overflows
-  Row 3  elapsed, total, counter in TIMER (Spleen 6x12); bar in SUB
+  Row 3  elapsed, progress bar, total, counter in TIMER (Spleen 5x8)
 
-Positions and greys match James's Figma mockup of 2026-10-08
-(incoming/OLED.png) pixel for pixel, except that the mockup's Row 2 sits
-3/8 px off the pixel grid (y=26.375) and is anti-aliased; the panel draws it
-crisp at y=26.
+Rows 1-2 match James's Figma mockup of 2026-10-08 (incoming/OLED.png) pixel
+for pixel, except that the mockup's Row 2 sits 3/8 px off the pixel grid
+(y=26.375) and is anti-aliased; the panel draws it crisp at y=26. Row 3 is
+the live design (Spleen 5x8 on a 48-column grid, live greys): the mockup's
+Row 3 was a Figma rendering artifact, as Figma has no 8px Spleen.
 
 Scramble rules:
   - Every element scrambles in once, on the initial paint.
@@ -45,19 +46,21 @@ SCROLL_TICK = 0.08
 SCROLL_PAUSE_DURATION = 1.5
 SCROLL_SPEED_PX = 3
 
-# Cell top-left positions from the Figma mockup. Rows 1-2 clip at x=248.
+# Rows 1-2: cell top-left positions from the Figma mockup; both clip at x=248.
 TEXT_RIGHT = 248
 ROW1_X, ROW1_Y = 8, 6
 ROW2_X, ROW2_Y = 9, 26
-ROW3_Y = 47                       # TIMER cells (elapsed, total, counter)
-ELAPSED_X, TOTAL_X = 9, 157
-COUNTER_RIGHT, COUNTER_WIDTH = 250, 7  # right-aligned in a "999/999" field
-BAR_X, BAR_Y, BAR_LEN = 50, 45, 16     # SUB slashes
+# Row 3: the live layout, TIMER cells on a 48-column grid from x=9.
+ROW3_X, ROW3_Y = 9, 47
+ELAPSED_COL = 0
+BAR_COL, BAR_LEN = 6, 26
+TOTAL_COL = 33
+COUNTER_COL, COUNTER_WIDTH = 41, 7  # right-aligned in a "999/999" field
 
 WHITE = (255, 255, 255)
-# Mockup greys: elapsed/counter 128 (level 8), played bar 114 (level 7),
-# total and unplayed bar 38 (level 2). The | is white like the rest of Row 2.
-UNPLAYED = (38, 38, 38)
+# Unplayed bar: panel level 2, validated on the panel. The | is white like
+# the rest of Row 2, as in the mockup.
+UNPLAYED = (34, 34, 34)
 
 PLAYLIST = [
     ("ネオ東京上空の風", "芸能山城組", "Symphonic Suite AKIRA", 228),
@@ -159,8 +162,8 @@ def mmss(seconds):
 
 
 class PlayerScreen:
-    def __init__(self, mode, size, reveal_frames, rng, mid_grey=128, played_grey=114,
-                 total_grey=38, pipe_grey=255, wide_noise="pair"):
+    def __init__(self, mode, size, reveal_frames, rng, mid_grey=136, played_grey=136,
+                 total_grey=68, pipe_grey=255, wide_noise="pair"):
         self.mid = (mid_grey,) * 3
         self.played = (played_grey,) * 3
         self.total = (total_grey,) * 3
@@ -169,7 +172,7 @@ class PlayerScreen:
         self.draw = ImageDraw.Draw(self.canvas)
         self.title = ScrollState(TITLE, TEXT_RIGHT + 1 - ROW1_X, reveal_frames, rng, wide_noise)
         self.artist_album = ScrollState(SUB, TEXT_RIGHT + 1 - ROW2_X, reveal_frames, rng, wide_noise)
-        self.row3 = {name: ScrollState(SUB if name == "bar" else TIMER, size[0], reveal_frames, rng)
+        self.row3 = {name: ScrollState(TIMER, size[0], reveal_frames, rng)
                      for name in ("elapsed", "bar", "total", "counter")}
         self.strips = {
             "title": Image.new(mode, (self.title.width, TITLE.cell_height)),
@@ -232,16 +235,17 @@ class PlayerScreen:
         self.draw.rectangle((0, 0, w - 1, h - 1), fill="black")
         self._draw_scrolling(self.title, "title", ROW1_X, ROW1_Y)
         self._draw_scrolling(self.artist_album, "sub", ROW2_X, ROW2_Y, pipe=self.pipe)
-        self._draw_row3(self.row3["elapsed"], ELAPSED_X, ROW3_Y, self.mid)
+        col = TIMER.advance
+        self._draw_row3(self.row3["elapsed"], ROW3_X + ELAPSED_COL * col, ROW3_Y, self.mid)
         bar = self.row3["bar"]
+        bar_xy = (ROW3_X + BAR_COL * col, ROW3_Y)
         items = bar.visible_items() or list(bar.text)
-        draw_items(self.draw, (BAR_X, BAR_Y), SUB, bar.offsets, items, UNPLAYED)
+        draw_items(self.draw, bar_xy, TIMER, bar.offsets, items, UNPLAYED)
         if self.bar_done:
-            draw_items(self.draw, (BAR_X, BAR_Y), SUB, bar.offsets[:self.bar_done],
+            draw_items(self.draw, bar_xy, TIMER, bar.offsets[:self.bar_done],
                        items[:self.bar_done], self.played)
-        self._draw_row3(self.row3["total"], TOTAL_X, ROW3_Y, self.total)
-        counter_x = COUNTER_RIGHT - COUNTER_WIDTH * TIMER.advance
-        self._draw_row3(self.row3["counter"], counter_x, ROW3_Y, self.mid)
+        self._draw_row3(self.row3["total"], ROW3_X + TOTAL_COL * col, ROW3_Y, self.total)
+        self._draw_row3(self.row3["counter"], ROW3_X + COUNTER_COL * col, ROW3_Y, self.mid)
 
 
 def grey_arg(parser, name, default, help_text):
@@ -254,9 +258,9 @@ def main():
     parser.add_argument("--reveal", type=float, default=1.6, help="seconds per scramble reveal")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--save-frames", type=Path, help="also write each frame as a PNG here")
-    grey_arg(parser, "--mid-grey", 128, "elapsed and counter (128 = level 8)")
-    grey_arg(parser, "--played-grey", 114, "played part of the bar (114 = level 7)")
-    grey_arg(parser, "--total-grey", 38, "total duration (38 = level 2)")
+    grey_arg(parser, "--mid-grey", 136, "elapsed and counter (136 = level 8; mockup 128)")
+    grey_arg(parser, "--played-grey", 136, "played part of the bar (136 = level 8; mockup 114)")
+    grey_arg(parser, "--total-grey", 68, "total duration (68 = level 4; mockup 38)")
     grey_arg(parser, "--pipe-grey", 255, "the | in Row 2 (255 = white, as in the mockup)")
     parser.add_argument("--wide-noise", choices=WIDE_NOISE_MODES, default="pair",
                         help="scramble noise in double-width cells")

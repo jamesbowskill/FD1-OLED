@@ -3,7 +3,11 @@
 (the panel's own drawing code), no device needed.
 
   mockup.png / mockup_diff.png  the Figma mockup's content, compared pixel
-                                for pixel with incoming/OLED.png
+                                for pixel with incoming/OLED.png (rows 1-2;
+                                Row 3 is the live Spleen 5x8 design, not the
+                                mockup's Figma rendering of it)
+  player_stills.png             the full screen with a Japanese, a Latin, a
+                                long scrolling Japanese, and a mixed title
   test_sheet.png                test strings (Latin, kana, kanji, mixed,
                                 substitutions, long) in the player layout
   wide_noise.png                mid-scramble frames: two narrow noise
@@ -15,6 +19,7 @@ usage: font_stills.py OUT_DIR [--mockup PATH]
 
 import argparse
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -59,9 +64,25 @@ def settled(title, artist, album, duration=228, elapsed=84, number=1, count=12,
     return screen.canvas.copy()
 
 
+def scrolling(title, artist, album, captures, duration=228, elapsed=84, seed=1):
+    """Run a track past its reveal on the live loop's timing (0.04 s ticks,
+    scroll steps every 2nd tick) and capture frames at the given tick
+    counts after the reveal. Returns [(frame, title phase, title x)]."""
+    screen = PlayerScreen("RGB", SIZE, 40, random.Random(seed))
+    screen.show_track(title, artist, album, duration, 1, 12, first=True)
+    screen.set_elapsed(elapsed, duration)
+    now, out = 0.0, []
+    for tick in range(max(captures) + 61):
+        screen.render()
+        if tick - 60 in captures:
+            out.append((screen.canvas.copy(), screen.title.phase, screen.title.x))
+        screen.tick(now, tick % 2 == 0)
+        now += 0.04
+    return out
+
+
 def missing(role, text):
-    path = role.path.read_text(errors="replace")
-    have = {int(m) for m in __import__("re").findall(r"^ENCODING (\d+)$", path, 8)}
+    have = {int(m) for m in re.findall(r"^ENCODING (\d+)$", role.path.read_text(errors="replace"), re.M)}
     return sorted({c for c in role.prepare(text) if ord(c) not in have and not c.isspace()})
 
 
@@ -70,7 +91,7 @@ def sheet(rows, scale=3, label_h=30):
     d = ImageDraw.Draw(out)
     for i, (im, note) in enumerate(rows):
         y = i * (SIZE[1] * scale + label_h)
-        d.text((6, y + 4), note, fill=LABEL)
+        d.text((6, y + 4), note, font=SUB.font, fill=LABEL)  # M+ so Japanese labels read
         out.paste(im.convert("RGB").resize((SIZE[0] * scale, SIZE[1] * scale), Image.NEAREST),
                   (0, y + label_h - 6))
     return out
@@ -95,14 +116,32 @@ def main():
         band = "row 1" if y < 24 else "row 2" if y < 44 else "row 3"
         bands[band] = bands.get(band, 0) + 1
     print(f"mockup: {len(bad)} of {SIZE[0] * SIZE[1]} pixels differ from {args.mockup.name}"
-          f"{' ' + str(bands) if bands else ''}")
+          f"{' ' + str(bands) if bands else ''} (rows 1-2 should differ only by Figma's Row 2"
+          f" anti-aliasing; Row 3 is the live Spleen 5x8 design, so it differs by design)")
     marked = Image.blend(mock, ours, 0.5)
     for x, y in bad:
         marked.putpixel((x, y), (255, 0, 0))
     sheet([(mock, "Figma mockup (incoming/OLED.png)"), (ours, "panel render (PlayerScreen)"),
-           (marked, f"differences in red: {len(bad)} px {bands}")]).save(args.out / "mockup_diff.png")
+           (marked, f"differences in red: {bands} (Row 3 differs by design)")]).save(
+        args.out / "mockup_diff.png")
 
-    # 2. Test strings in the player layout.
+    # 2. The full player screen: Japanese, Latin, long scrolling Japanese, mixed.
+    rows = []
+    for label, title, artist, album in (
+            ("(a) Japanese", "ネオ東京上空の風", "芸能山城組", "Symphonic Suite AKIRA"),
+            ("(b) Latin", "Sure Shot", "Beastie Boys", "Ill Communication"),
+            ("(d) mixed", "Perfume — ポリリズム (Live at 東京ドーム)", "Perfume", "GAME")):
+        im = settled(title, artist, album)
+        im.save(frames / f"player_{label[1]}.png")
+        rows.append((im, f"{label}: {title}"))
+    long_title = "千と千尋の神隠し サウンドトラック 〜あの夏へ〜 ふたたび"
+    for im, phase, x in scrolling(long_title, "久石譲", "千と千尋の神隠し", captures=(20, 75, 140)):
+        im.save(frames / f"player_c_{phase}.png")
+        rows.insert(2 + sum(1 for _, n in rows if n.startswith("(c)")),
+                    (im, f"(c) long Japanese title, scroll phase '{phase}', x offset {x} px"))
+    sheet(rows).save(args.out / "player_stills.png")
+
+    # 3. Test strings in the player layout.
     rows = []
     for name, title, artist, album in TESTS:
         im = settled(title, artist, album)
@@ -117,7 +156,7 @@ def main():
         rows.append((im, note))
     sheet(rows).save(args.out / "test_sheet.png")
 
-    # 3. Wide-cell noise: the same scramble frames, pair vs full-width.
+    # 4. Wide-cell noise: the same scramble frames, pair vs full-width.
     rows = []
     for stop_at in (8, 16):
         for mode in ("pair", "fullwidth"):
@@ -126,7 +165,7 @@ def main():
             im.save(frames / f"wide_noise_{mode}_f{stop_at}.png")
             rows.append((im, f"frame {stop_at} of the reveal, wide-cell noise: {mode}"))
     sheet(rows).save(args.out / "wide_noise.png")
-    print(f"wrote mockup.png, mockup_diff.png, test_sheet.png, wide_noise.png and frames/ to {args.out}")
+    print(f"wrote mockup.png, mockup_diff.png, player_stills.png, test_sheet.png, wide_noise.png and frames/ to {args.out}")
 
 
 if __name__ == "__main__":
